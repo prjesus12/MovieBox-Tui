@@ -117,6 +117,7 @@ function ItemNodeFields(values as Object) as Object
         ep: 0
         resumeAt: 0
         subtitle: ""
+        AUDIO_GUIDE_TEXT: ""
     }
     if values <> invalid then
         for each key in values
@@ -124,6 +125,13 @@ function ItemNodeFields(values as Object) as Object
         end for
     end if
     return fields
+end function
+
+' RowList speaks the focused tile through AUDIO_GUIDE_TEXT (falling back to
+' TITLE), so give it one sentence worth hearing instead of a bare name.
+function ItemAudioGuide(item as Object) as String
+    if item = invalid then return ""
+    return JoinNonEmpty([item.title, item.year, item.duration], ", ")
 end function
 
 function NodeFromSnapshot(item as Object) as Object
@@ -140,6 +148,7 @@ function NodeFromSnapshot(item as Object) as Object
         rating: item.rating
         durationText: item.duration
         backdrop: item.backdrop
+        AUDIO_GUIDE_TEXT: ItemAudioGuide(item)
     }))
     return node
 end function

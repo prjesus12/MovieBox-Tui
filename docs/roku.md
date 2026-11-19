@@ -75,6 +75,8 @@ it holds 60 files, because `tmp:` is small and shared with downloaded subtitles.
 
 - No DRM: protected titles are not playable.
 - No Roku Search feed, so the platform's global search does not list the channel.
-- Widgets have no screen-reader labels yet.
+- Screen reader coverage is partial: browse tiles, search results and episodes set
+  `AUDIO_GUIDE_TEXT` so the focused item is spoken. The player overlay, toasts and
+  the custom keyboard keys are still silent.
 - Playback, focus and dialog behaviour are only verified by the static check;
   there is no device or harness test in CI.

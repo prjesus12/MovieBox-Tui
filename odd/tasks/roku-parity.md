@@ -56,8 +56,8 @@ S11. The channel source must live outside `roku/build/` (a build output dir), a
 | T4 | S7 | inline | done — home 30m, search 10m, details/seasons 24h; play-info never cached |
 | T5 | S6, S8 | inline | done — Settings section, hideHindi pref gates the catalogue filters |
 | T6 | S9 | inline | done for mediaType routing; autoplay needs a DetailsScreen field |
-| T7 | S10 | inline | pending — Roku screen-reader API must be verified before writing it |
-| T8 | S11 | inline | pending — moves 61 tracked files, needs the branch decision |
+| T7 | S10 | inline | done — AUDIO_GUIDE_TEXT on tiles and episodes (Roku TTS docs) |
+| T8 | S11 | inline | done — source moved to `roku/app`, script, CI, docs |
 
 ## Log
 
@@ -87,3 +87,19 @@ baseline (zero). Slice 2 commit hash recorded below.
 L8 (deviation, recorded): S7 asked for homepage caching too. Home payloads reach
 the 400 KB cap that protects `tmp:/` (shared with downloaded subtitles), so the
 cap silently skips the largest pages; that is intended, not a bug.
+
+L9 (incident, recorded): while this work was in progress another process in the
+same checkout moved HEAD to `main`, pulled it, and committed `41f3ed7` onto
+`feat/roku-hardening`. The packaging commit was therefore made on `main` against
+a tree without these fixes. Resolved with the user's authorization: redone on
+`feat/roku-hardening` (`6134f07`, fixes preserved), `main` reset to `origin/main`,
+and the discarded commit kept reachable as `roku-main-packaging-rescue`.
+
+L10 (evidence): commits per slice — `e979a60` correctness, `f480c49` settings,
+`6134f07` packaging, `e57e24e` tile field list, plus the accessibility slice.
+Every one compiles with zero brighterscript diagnostics; none is device-tested.
+
+L11 (decision): accessibility scope from the Roku text-to-speech reference —
+`RowList`/`MarkupGrid`/`LabelList` speak `ContentMetaData::AUDIO_GUIDE_TEXT` (else
+`TITLE`), so only the item nodes were changed. Player overlay and toasts stay
+silent and are documented as a limitation rather than guessed at.

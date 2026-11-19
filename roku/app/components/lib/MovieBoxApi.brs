@@ -607,6 +607,7 @@ function MB_ItemNode(item as Object) as Object
         country: item.country
         backdrop: item.backdrop
         wide: item.wide
+        AUDIO_GUIDE_TEXT: ItemAudioGuide(item)
     }))
     return node
 end function
