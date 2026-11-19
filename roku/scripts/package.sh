@@ -17,6 +17,6 @@ mkdir -p "$root/build"
 rm -f "$out"
 # -x keeps editor and Finder droppings out; a stray __MACOSX or .DS_Store entry
 # is enough for the device to reject the package.
-(cd "$app" && zip -qr "$out" . -x '.*' -x '*/.*')
+(cd "$app" && zip -qr "$out" . -x '.*' -x '*/.*' -x '__MACOSX/*' -x '*/__MACOSX/*')
 
 printf 'packaged %s (%s)\n' "$out" "$(du -h "$out" | cut -f1)"

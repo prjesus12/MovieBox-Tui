@@ -67,8 +67,7 @@ sub buildGrid(season as Object)
         ' The screen reader speaks AUDIO_GUIDE_TEXT (or TITLE); these tiles had
         ' neither, so a whole episode grid was silent.
         child.title = "Episode " + ep.ToStr()
-        guide = "Season " + season.se.ToStr() + ", episode " + ep.ToStr()
-        child.addFields({ se: season.se, ep: ep, progress: 0.0, subtitle: "", resumeAt: 0, AUDIO_GUIDE_TEXT: guide })
+        child.addFields(ItemNodeFields({ se: season.se, ep: ep }))
         if episodes <> invalid then
             info = episodes[season.se.ToStr() + "x" + ep.ToStr()]
             if info <> invalid and info.d > 0 then
@@ -82,7 +81,11 @@ sub buildGrid(season as Object)
                 end if
             end if
         end if
-        child.AUDIO_GUIDE_TEXT = guide + ". " + child.subtitle
+        ' One assignment, after the progress pass, so there is no second write to
+        ' trace and no dangling separator when there is no subtitle.
+        guide = "Season " + season.se.ToStr() + ", episode " + ep.ToStr()
+        if child.subtitle <> "" then guide = guide + ". " + child.subtitle
+        child.AUDIO_GUIDE_TEXT = guide
     end for
     m.grid.content = content
     if m.pendingEpisode > 0 and m.pendingEpisode <= season.maxEp then
