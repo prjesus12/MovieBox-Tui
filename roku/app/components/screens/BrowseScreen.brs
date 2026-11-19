@@ -307,6 +307,14 @@ end sub
 ' Rebuilding hands the RowList a brand new root and reparents every remote row,
 ' which is the expensive part of coming back from a details screen. Fingerprint
 ' the local data (and the preference that filters it) and skip when it matches.
+' Ids alone are not enough: a favourite saved before its backdrop existed can be
+' rewritten with the same id and different title or art, and a title-only digest
+' would leave that row stale on screen. Fingerprint what the row renders.
+function itemDigest(item as Object) as String
+    if item = invalid then return ""
+    return JoinNonEmpty([item.id, item.title, item.poster, item.backdrop, item.tag], "|")
+end function
+
 function localDigest() as String
     parts = ["hindi=" + PrefGet("hideHindi", "on")]
     for each entry in HistoryAll()
@@ -315,12 +323,12 @@ function localDigest() as String
             if entry.position <> invalid then position = entry.position.ToStr()
             stamp = "0"
             if entry.updated <> invalid then stamp = entry.updated.ToStr()
-            parts.Push(entry.item.id + ":" + position + ":" + stamp)
+            parts.Push(itemDigest(entry.item) + ":" + position + ":" + stamp)
         end if
     end for
     parts.Push("|")
     for each item in FavoritesAll()
-        if item <> invalid then parts.Push(item.id)
+        parts.Push(itemDigest(item))
     end for
     return parts.Join(",")
 end function
