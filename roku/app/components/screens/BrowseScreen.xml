@@ -44,6 +44,8 @@
         </Group>
         <Spinner id="spinner" translation="[960, 700]" />
         <Timer id="heroTimer" duration="0.2" repeat="false" />
+        <Timer id="loadTimer" duration="30" repeat="false" />
+        <Timer id="crashTimer" duration="0.75" repeat="false" />
         <Animation id="fadeIn" duration="0.45" easeFunction="outQuad">
             <FloatFieldInterpolator key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="backdrop.opacity" />
         </Animation>

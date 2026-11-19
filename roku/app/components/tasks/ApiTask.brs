@@ -52,6 +52,10 @@ sub runRequest()
     else
         result = { ok: false, error: "Unknown action" }
     end if
+    ' A loader that died on an unexpected payload returns nothing; publishing a
+    ' failure keeps the response field set, which is the only signal the screens
+    ' watch. Without it the spinner would never stop.
+    if result = invalid then result = { ok: false, error: "MovieBox returned an unexpected answer" }
     result.action = action
     result.token = req.token
     MB_Log("task done: " + action)
@@ -63,95 +67,228 @@ end sub
 ' ---------------------------------------------------------------------------
 
 function loadHome(tabId as String) as Object
+    rule = categoryTabRule(tabId)
+    ' A category page can be one title wide; Home keeps its short rows out.
+    minItems = 3
+    if rule <> "" then minItems = 1
+
+    page = pageRows(tabId)
+    if not page.ok then return { ok: false, error: page.error }
+
+    seen = {}
+    kept = keptRows(page.rows, "", minItems, 18, seen)
+
+    ' Movies, TV Shows and Anime are curated pages built mostly out of category and
+    ' people tiles, so they can carry almost no playable row at all (the Movies page
+    ' is nothing but category links today). Home carries the same catalogue as plain
+    ' subject rows, so borrow the rows that belong to this tab instead of handing the
+    ' viewer an empty page.
+    if rule <> "" and itemsIn(kept) < 8 then
+        home = pageRows("1")
+        if home.ok then
+            room = 18 - kept.Count()
+            if room > 0 then
+                for each row in keptRows(home.rows, rule, minItems, room, seen)
+                    if not hasRow(kept, row.keyTitle) then kept.Push(row)
+                end for
+            end if
+        end if
+    end if
+
+    if kept.Count() = 0 then return { ok: false, error: "Nothing to show right now" }
+    m.top.content = rowsToContent(kept)
+    MB_Log("home rows built: " + kept.Count().ToStr() + " for tab " + tabId)
+    return { ok: true, rows: kept.Count() }
+end function
+
+function hasRow(rows as Object, title as String) as Boolean
+    for each row in rows
+        if row.keyTitle = title then return true
+    end for
+    return false
+end function
+
+' Which catalogue a category tab shows. Empty for the plain tabs.
+function categoryTabRule(tabId as String) as String
+    if tabId = "2" then return "movie"
+    if tabId = "5" then return "series"
+    if tabId = "8" then return "anime"
+    return ""
+end function
+
+' Reads one catalogue page and returns its rows as plain values. Rows are parsed by
+' what they carry, never by the type label: the API reuses CUSTOM and plain subject
+' groups for the same catalogue and keeps adding type names the channel has never
+' heard of.
+function pageRows(tabId as String) as Object
+    page = { ok: false, rows: [], error: "MovieBox returned an empty page" }
     ' Catalogue pages tolerate a short staleness window; 30 minutes keeps a tab
     ' switch instant without showing a yesterday's home page.
     res = MB_GetCached("/wefeed-mobile-bff/tab-operating?page=1&tabId=" + tabId + "&version=", 1800)
-    if not res.ok then return { ok: false, error: res.error }
-
+    if not res.ok then
+        page.error = res.error
+        return page
+    end if
     groups = invalid
     if Type(res.data) = "roAssociativeArray" then groups = res.data.items
-    if groups = invalid then return { ok: false, error: "MovieBox returned an empty page" }
+    if groups = invalid then return page
+    page.ok = true
+    for each group in asList(groups)
+        row = rowFromGroup(group)
+        if row <> invalid then page.rows.Push(row)
+    end for
+    return page
+end function
 
-    root = CreateObject("roSGNode", "ContentNode")
-    seen = {}
-    rowCount = 0
-    for each group in groups
-        if rowCount >= 18 then exit for
-        gtype = MB_Str(group.type)
-        title = MB_Html(MB_Str(group.title)).Trim()
-        subjectsAllowed = not MB_IsHiddenRow(title)
-        subjects = []
-        kind = "poster"
-        if gtype = "BANNER" then
-            kind = "wide"
-            title = "Featured"
-            if group.banner <> invalid and group.banner.banners <> invalid then
-                for each b in group.banner.banners
-                    if b.subject <> invalid then
-                        wideUrl = ""
-                        if b.image <> invalid then wideUrl = MB_Str(b.image.url)
-                        subjects.Push({ subject: b.subject, wide: wideUrl })
-                    end if
-                end for
-            end if
-        else if gtype = "RANKING_LIST_MULTI_TAB" then
-            if group.rankingListData <> invalid and group.rankingListData.items <> invalid then
-                tabs = group.rankingListData.items
-                if tabs.Count() > 0 and tabs[0].subjects <> invalid then
-                    for each s in tabs[0].subjects
-                        subjects.Push({ subject: s, wide: "" })
-                    end for
+' A group can arrive as an object instead of an array; iterating an object yields
+' its keys, and the next field access on a string kills the task thread.
+function asList(value as Dynamic) as Object
+    out = []
+    if Type(value) = "roArray" then return value
+    if Type(value) = "roAssociativeArray" then
+        for each key in value
+            out.Push(value[key])
+        end for
+    end if
+    return out
+end function
+
+function rowFromGroup(group as Dynamic) as Dynamic
+    if Type(group) <> "roAssociativeArray" then return invalid
+    title = MB_Html(MB_Str(group.title)).Trim()
+    ' Hidden rows are matched on the raw title: the banner row is renamed below.
+    allowed = not MB_IsHiddenRow(title)
+    kind = "poster"
+    raw = []
+    gtype = MB_Str(group.type)
+    if gtype = "BANNER" then
+        kind = "wide"
+        title = "Featured"
+        if Type(group.banner) = "roAssociativeArray" then
+            for each b in asList(group.banner.banners)
+                if Type(b) = "roAssociativeArray" and Type(b.subject) = "roAssociativeArray" then
+                    wideUrl = ""
+                    if Type(b.image) = "roAssociativeArray" then wideUrl = MB_Str(b.image.url)
+                    raw.Push({ subject: b.subject, wide: wideUrl })
                 end if
-            end if
-        else if gtype = "SUBJECTS_MOVIE" or gtype = "APPOINTMENT_LIST" then
-            if group.subjects <> invalid then
-                for each s in group.subjects
-                    subjects.Push({ subject: s, wide: "" })
-                end for
-            end if
-        else if gtype = "CUSTOM" then
-            if group.customData <> invalid and group.customData.items <> invalid then
-                for each c in group.customData.items
-                    if c.subject <> invalid then subjects.Push({ subject: c.subject, wide: "" })
+            end for
+        end if
+    else if gtype = "RANKING_LIST_MULTI_TAB" then
+        if Type(group.rankingListData) = "roAssociativeArray" then
+            tabs = asList(group.rankingListData.items)
+            if tabs.Count() > 0 and Type(tabs[0]) = "roAssociativeArray" then
+                for each s in asList(tabs[0].subjects)
+                    raw.Push({ subject: s, wide: "" })
                 end for
             end if
         end if
-
-        items = []
-        if not subjectsAllowed then subjects = []
-        for each entry in subjects
-            item = MB_NormalizeSubject(entry.subject)
-            if item <> invalid then
-                if kind = "wide" then
-                    if entry.wide <> "" then item.wide = MB_Image(entry.wide, 640) else item.wide = item.backdrop
-                    if entry.wide <> "" then item.backdrop = MB_Image(entry.wide, 1280)
+    else
+        ' A CUSTOM group is a wall of tiles; anything else is a plain subject list.
+        ' Both shapes are read whatever the group is called, and the group's own
+        ' shape comes first so the item cap never pushes it out.
+        custom = []
+        if Type(group.customData) = "roAssociativeArray" then
+            for each c in asList(group.customData.items)
+                ' Tiles are a mix of real subjects, film categories and people links.
+                ' Only the ones that carry a subject can be opened by this channel;
+                ' the rest point at screens it does not have.
+                if Type(c) = "roAssociativeArray" and Type(c.subject) = "roAssociativeArray" then
+                    custom.Push({ subject: c.subject, wide: "" })
                 end if
-                rowKey = kind + item.id
-                titleKey = title + "|" + LCase(item.title) + "|" + item.year
-                if seen[rowKey] = invalid and seen[titleKey] = invalid then
-                    seen[rowKey] = true
-                    seen[titleKey] = true
-                    items.Push(item)
-                end if
-            end if
-            if items.Count() >= 30 then exit for
-        end for
-
-        if items.Count() >= 3 then
-            row = root.createChild("ContentNode")
-            row.title = cleanRowTitle(title)
-            row.addFields({ kind: kind })
-            for each item in items
-                row.appendChild(MB_ItemNode(item))
             end for
-            rowCount = rowCount + 1
+        end if
+        if gtype = "CUSTOM" then
+            for each entry in custom
+                raw.Push(entry)
+            end for
+            for each s in asList(group.subjects)
+                raw.Push({ subject: s, wide: "" })
+            end for
+        else
+            for each s in asList(group.subjects)
+                raw.Push({ subject: s, wide: "" })
+            end for
+            for each entry in custom
+                raw.Push(entry)
+            end for
+        end if
+    end if
+    ' The dedupe key keeps the row title as sent: cleaning it can collapse two
+    ' different rows to the same label and hide their titles from each other.
+    return { title: cleanRowTitle(title), keyTitle: title, kind: kind, allowed: allowed, raw: raw }
+end function
+
+' Normalises the subjects of a page and keeps the rows that belong to it. A row is
+' dropped only when nothing in it is playable any more, never for being short: a
+' one-title row is the whole content of some category pages.
+function keptRows(rows as Object, rule as String, minItems as Integer, maxRows as Integer, seen as Object) as Object
+    out = []
+    rowCount = 0
+    for each row in rows
+        if rowCount >= maxRows then exit for
+        if row.allowed then
+            items = []
+            for each entry in row.raw
+                item = MB_NormalizeSubject(entry.subject)
+                if item <> invalid and matchesRule(item, rule) then
+                    if row.kind = "wide" then
+                        if entry.wide <> "" then
+                            item.wide = MB_Image(entry.wide, 640)
+                            item.backdrop = MB_Image(entry.wide, 1280)
+                        else
+                            item.wide = item.backdrop
+                        end if
+                    end if
+                    rowKey = row.kind + item.id
+                    titleKey = row.keyTitle + "|" + LCase(item.title) + "|" + item.year
+                    if seen[rowKey] = invalid and seen[titleKey] = invalid then
+                        seen[rowKey] = true
+                        seen[titleKey] = true
+                        items.Push(item)
+                    end if
+                end if
+                if items.Count() >= 30 then exit for
+            end for
+            if items.Count() >= minItems then
+                out.Push({ title: row.title, keyTitle: row.keyTitle, kind: row.kind, items: items })
+                rowCount = rowCount + 1
+            end if
         end if
     end for
+    return out
+end function
 
-    MB_Log("home rows built: " + rowCount.ToStr())
-    if rowCount = 0 then return { ok: false, error: "Nothing to show right now" }
-    m.top.content = root
-    return { ok: true, rows: rowCount }
+function matchesRule(item as Object, rule as String) as Boolean
+    if rule = "movie" then return item.stype = 1 and not isAnimeItem(item)
+    if rule = "series" then return item.stype = 2
+    if rule = "anime" then return isAnimeItem(item)
+    return true
+end function
+
+function isAnimeItem(item as Object) as Boolean
+    genre = LCase(MB_Str(item.genre))
+    return Instr(1, genre, "anime") > 0 or Instr(1, genre, "animation") > 0
+end function
+
+function itemsIn(rows as Object) as Integer
+    total = 0
+    for each row in rows
+        total = total + row.items.Count()
+    end for
+    return total
+end function
+
+function rowsToContent(rows as Object) as Object
+    root = CreateObject("roSGNode", "ContentNode")
+    for each row in rows
+        node = root.createChild("ContentNode")
+        node.title = row.title
+        node.addFields({ kind: row.kind })
+        for each item in row.items
+            node.appendChild(MB_ItemNode(item))
+        end for
+    end for
+    return root
 end function
 
 ' Removes leading emoji/symbols the Roku fonts cannot render.

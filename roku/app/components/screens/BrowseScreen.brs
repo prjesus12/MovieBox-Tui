@@ -4,6 +4,8 @@ sub init()
     m.backdrop = m.top.findNode("backdrop")
     m.fadeIn = m.top.findNode("fadeIn")
     m.heroTimer = m.top.findNode("heroTimer")
+    m.loadTimer = m.top.findNode("loadTimer")
+    m.crashTimer = m.top.findNode("crashTimer")
     m.hero = m.top.findNode("hero")
     m.heroTag = m.top.findNode("heroTag")
     m.heroTagBg = m.top.findNode("heroTagBg")
@@ -18,6 +20,8 @@ sub init()
     m.rows.observeField("rowItemFocused", "onItemFocused")
     m.rows.observeField("rowItemSelected", "onItemSelected")
     m.heroTimer.observeField("fire", "updateHero")
+    m.loadTimer.observeField("fire", "onLoadTimeout")
+    m.crashTimer.observeField("fire", "onTaskEnded")
     m.backdrop.observeField("loadStatus", "onBackdropStatus")
 
     m.remoteRows = []
@@ -39,36 +43,86 @@ end function
 sub load()
     m.failed = false
     m.emptyState.visible = false
+    ' Abandon any in-flight page load: switching tabs quickly used to leave several
+    ' tasks running, all racing to overwrite m.remoteRows.
+    cancelTask()
     if isLibrary() then
+        m.spinner.running = false
         buildRows()
         return
     end if
-    ' Abandon any in-flight page load: switching tabs quickly used to leave
-    ' several tasks running, all racing to overwrite m.remoteRows.
-    cancelTask()
     m.spinner.message = ""
     m.spinner.running = true
     m.task = CreateObject("roSGNode", "ApiTask")
     m.task.observeField("response", "onResponse")
+    ' A task can die on a payload nobody expected. BrightScript has no try/catch, so
+    ' the only evidence is a field that never arrives: watch the task and give the
+    ' spinner a deadline instead of spinning forever.
+    m.task.observeField("state", "onTaskState")
     m.task.request = { action: "home", tabId: m.top.tabId }
     m.task.control = "run"
+    stopTimer(m.crashTimer)
+    m.loadTimer.control = "stop"
+    m.loadTimer.control = "start"
 end sub
 
 sub cancelTask()
+    stopTimer(m.loadTimer)
+    stopTimer(m.crashTimer)
     if m.task = invalid then return
     m.task.unobserveField("response")
+    m.task.unobserveField("state")
     m.task.control = "stop"
     m.task = invalid
+end sub
+
+sub stopTimer(timer as Dynamic)
+    if timer = invalid then return
+    timer.control = "stop"
+end sub
+
+' The task finished its thread. A published response is handled by onResponse; an
+' absent one means the parse threw, and waiting for it would be waiting forever.
+' The short grace timer lets a response that is still queued through first.
+sub onTaskState()
+    if m.task = invalid then return
+    state = m.task.state
+    if state <> "done" and state <> "stop" then return
+    m.loadTimer.control = "stop"
+    m.crashTimer.control = "stop"
+    m.crashTimer.control = "start"
+end sub
+
+sub onTaskEnded()
+    if m.task = invalid then return
+    if m.task.response <> invalid then return
+    m.spinner.running = false
+    m.task = invalid
+    m.failed = true
+    showEmpty("Couldn't load this page", "The channel could not read this list." + chr(10) + "Press OK to try again.")
+end sub
+
+' Still running after the deadline: show the retry screen, but leave the task alive
+' so a slow network can still fill the page when it answers.
+sub onLoadTimeout()
+    if m.task = invalid or m.failed then return
+    m.spinner.running = false
+    m.failed = true
+    showEmpty("This is taking longer than usual", "The MovieBox servers are slow to answer." + chr(10) + "Press OK to try again.")
 end sub
 
 sub onResponse()
     ' A cancelled load must never be able to publish its rows.
     if m.task = invalid then return
     res = m.task.response
+    content = m.task.content
+    stopTimer(m.loadTimer)
+    stopTimer(m.crashTimer)
     m.spinner.running = false
+    m.task = invalid
     if res.ok = true then
+        m.failed = false
         m.remoteRows = []
-        content = m.task.content
         if content <> invalid then
             for i = 0 to content.getChildCount() - 1
                 m.remoteRows.Push(content.getChild(i))
@@ -80,7 +134,6 @@ sub onResponse()
         m.failed = true
         showEmpty("Couldn't load this page", res.error + chr(10) + "Press OK to try again.")
     end if
-    m.task = invalid
 end sub
 
 sub showEmpty(title as String, text as String)
@@ -127,6 +180,9 @@ sub buildRows()
     if ordered.Count() = 0 then
         if isLibrary() then
             showEmpty("Your library is empty", "Titles you start watching or add to My List will show up here.")
+        else
+            m.failed = true
+            showEmpty("Nothing to show right now", "Press OK to try again.")
         end if
         return
     end if

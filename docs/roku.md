@@ -71,6 +71,16 @@ hours. Signed `play-info` responses are never cached because the CDN URLs they
 return expire. Payloads above 400 KB are skipped, and the cache is emptied once
 it holds 60 files, because `tmp:` is small and shared with downloaded subtitles.
 
+## Catalogue tabs
+
+Home arrives as plain subject rows, but Movies, TV Shows and Anime are curated
+pages built mostly out of category and people tiles: their `customData` items
+carry a real `subject` only on some rows, and the Movies page carries none at all.
+The channel renders the tiles it can open and, when a category page is left with
+almost nothing, fills it with the Home rows that belong to that catalogue (movies,
+series, anime by genre). A page that still has nothing to show, or a catalogue
+request that fails, lands on a retry screen instead of an endless spinner.
+
 ## Known limitations
 
 - No DRM: protected titles are not playable.
