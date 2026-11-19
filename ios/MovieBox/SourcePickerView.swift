@@ -12,9 +12,7 @@ struct SourcePickerView: View {
     @State private var releases: [MobileRelease] = []
 
     private var playable: [MobileRelease] {
-        releases
-            .filter { $0.isDirectFile && $0.url?.isEmpty == false }
-            .sorted { Format.qualityRank($0.quality) > Format.qualityRank($1.quality) }
+        Format.playableDirectFiles(releases)
     }
 
     private var manifests: [MobileRelease] {
@@ -206,10 +204,6 @@ struct SourcePickerView: View {
 
     private func start(_ release: MobileRelease) {
         guard let raw = release.url, let url = URL(string: raw) else { return }
-        let label = [release.quality, release.sourceLabel]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
         let playback = PlaybackRequest(
             url: url,
             headers: release.headers,
@@ -224,7 +218,9 @@ struct SourcePickerView: View {
             episode: request.episode,
             resourceId: release.resourceId,
             startAt: request.startAt,
-            releaseLabel: label.isEmpty ? release.sourceLabel : label
+            releaseLabel: Format.releaseLabel(release),
+            siblingIds: request.siblingIds,
+            alternatives: Format.fallbackCandidates(after: release, in: playable)
         )
         model.play(playback)
     }

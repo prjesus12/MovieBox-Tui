@@ -77,6 +77,9 @@ pub struct MobileDetails {
     pub genres: Vec<String>,
     pub poster_url: Option<String>,
     pub seasons: Vec<MobileSeason>,
+    /// Dub `subject_id`s sibling to this subject. Passing them to `captions`
+    /// widens the caption set the way the terminal client already does.
+    pub sibling_subject_ids: Vec<String>,
 }
 
 /// An HTTP header the player must send with the stream request.
@@ -223,14 +226,25 @@ impl MobileClient {
                 .await
         });
         let releases = releases.map_err(|error| MobileError::new(error.to_string()))?;
+        // Spec S2/S3: the Hindi filter lives in the core, so the iOS picker and
+        // autoplay see exactly what the terminal client sees.
+        let releases = if crate::config::load().hide_hindi {
+            crate::language_filter::filter_releases(releases)
+        } else {
+            releases
+        };
         Ok(releases.into_iter().map(release_from).collect())
     }
 
     /// Subtitle tracks for a release whose `resource_id` is known.
+    ///
+    /// `sibling_ids` are the dub subject ids from `MobileDetails`, which is how
+    /// the terminal client reaches the captions of every available dub.
     pub fn captions(
         &self,
         subject_id: String,
         resource_id: String,
+        sibling_ids: Vec<String>,
         season: u32,
         episode: u32,
     ) -> MobileResult<Vec<MobileSubtitle>> {
@@ -239,12 +253,37 @@ impl MobileClient {
             .block_on(self.service.get_ext_captions(
                 &subject_id,
                 &resource_id,
-                &[],
+                &sibling_ids,
                 season as usize,
                 episode as usize,
             ))
             .map_err(MobileError::new)?;
         Ok(captions.into_iter().map(subtitle_from).collect())
+    }
+
+    /// Online subtitles for a title, searched by the content being watched.
+    ///
+    /// Returns an empty list instead of failing: the picker still shows the
+    /// provider captions, so a missing internet connection never blocks playback.
+    pub fn search_online_subtitles(
+        &self,
+        title: String,
+        year: Option<String>,
+        is_series: bool,
+        season: u32,
+        episode: u32,
+    ) -> Vec<MobileSubtitle> {
+        self.runtime
+            .block_on(self.service.search_online_subtitles(
+                &title,
+                year.as_deref(),
+                is_series,
+                season as usize,
+                episode as usize,
+            ))
+            .into_iter()
+            .map(subtitle_from)
+            .collect()
     }
 
     /// Favorites, newest last, mirroring the terminal client's ordering.
@@ -330,10 +369,14 @@ fn same_provider(a: &str, b: &str) -> bool {
 }
 
 fn catalog_item_from(item: CatalogItem) -> MobileCatalogItem {
+    // Spec S6a: the raw title keeps the provider's dub marker for detection, and
+    // the record Swift renders carries the cleaned form instead, so the marker
+    // never reaches an iOS listing.
+    let title = crate::providers::moviebox::clean_moviebox_title(&item.title).to_string();
     MobileCatalogItem {
         provider: item.id.provider.label().to_string(),
         id: item.id.value,
-        title: item.title,
+        title,
         is_series: item.media_type == MediaType::Series,
         year: item.year,
         poster_url: item.poster_url,
@@ -344,7 +387,9 @@ fn favorite_item_from(item: &crate::favorites::FavoriteItem) -> MobileCatalogIte
     MobileCatalogItem {
         id: item.subject_id.clone(),
         provider: item.provider.clone(),
-        title: item.title.clone(),
+        // Spec S6a: favorites stored before this change still hold the marked
+        // title, so the marker is stripped on the way out as well.
+        title: crate::providers::moviebox::clean_moviebox_title(&item.title).to_string(),
         is_series: item.stype == 2,
         year: if item.release_year.trim().is_empty() {
             None
@@ -359,7 +404,9 @@ fn history_item_from(item: &crate::history::WatchHistoryItem) -> MobileHistoryIt
     MobileHistoryItem {
         provider: item.provider.clone(),
         subject_id: item.subject_id.clone(),
-        title: item.title.clone(),
+        // Spec S6a: same as favorites, history rows recorded before this change
+        // are shown without the marker.
+        title: crate::providers::moviebox::clean_moviebox_title(&item.title).to_string(),
         poster_url: item.cover_url.clone(),
         is_series: item.stype == 2,
         year: item.release_year.clone(),
@@ -420,10 +467,19 @@ fn details_for_storage(item: &MobileCatalogItem) -> MediaDetails {
 }
 
 fn details_from(details: &MediaDetails) -> MobileDetails {
+    // Spec S2/S3: Hindi dubs are dropped here, so `sibling_subject_ids` (and the
+    // caption search that walks it) never reaches a Hindi dub either.
+    let dubs = if crate::config::load().hide_hindi {
+        crate::language_filter::filter_dubs(details.dubs.clone())
+    } else {
+        details.dubs.clone()
+    };
     MobileDetails {
         id: details.id.value.clone(),
         provider: details.id.provider.label().to_string(),
-        title: details.title.clone(),
+        // S8: the player HUD and the online subtitle search both read this title, so
+        // the dub marker of a MovieBox subject title never reaches the viewer.
+        title: crate::providers::moviebox::title::clean_subtitle_title(&details.title),
         is_series: details.is_series(),
         year: details.year.clone(),
         overview: details.description.clone(),
@@ -434,6 +490,11 @@ fn details_from(details: &MediaDetails) -> MobileDetails {
         runtime: details.duration.clone(),
         genres: details.genres.clone(),
         poster_url: details.poster_url.clone(),
+        sibling_subject_ids: dubs
+            .iter()
+            .map(|dub| dub.subject_id.clone())
+            .filter(|id| !id.is_empty() && *id != details.id.value)
+            .collect(),
         seasons: details
             .seasons
             .iter()
@@ -509,6 +570,29 @@ mod tests {
     fn same_provider_accepts_display_and_key_forms() {
         assert!(same_provider("MovieBox", "moviebox"));
         assert!(!same_provider("MovieBox", "Dramachi"));
+    }
+
+    #[test]
+    fn catalog_item_from_exposes_a_cleaned_listing_title() {
+        // Spec S6a: iOS renders the record title verbatim, so the dub marker
+        // never reaches it even though the raw catalog title still carries it.
+        let item = CatalogItem {
+            id: crate::providers::models::ProviderMediaId {
+                provider: ProviderKind::MovieBox,
+                value: "123".to_string(),
+            },
+            title: "[Hindi] Ek Deewane Ki Deewaniyat".to_string(),
+            media_type: MediaType::Movie,
+            year: Some("2025".to_string()),
+            poster_url: None,
+            season_count: None,
+        };
+
+        let mobile = catalog_item_from(item);
+
+        assert_eq!(mobile.title, "Ek Deewane Ki Deewaniyat");
+        assert_eq!(mobile.id, "123");
+        assert_eq!(mobile.year.as_deref(), Some("2025"));
     }
 
     #[test]

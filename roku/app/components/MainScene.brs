@@ -14,6 +14,7 @@ sub init()
         { title: "Search", kind: "search", tabId: "" }
         { title: "My Library", kind: "browse", tabId: "library" }
         { title: "Providers", kind: "providers", tabId: "" }
+        { title: "Settings", kind: "settings", tabId: "" }
     ]
     titles = []
     for each s in m.sections
@@ -67,6 +68,8 @@ function sectionScreen(index as Integer) as Object
         screen = m.sectionsGroup.createChild("SearchScreen")
     else if section.kind = "providers" then
         screen = m.sectionsGroup.createChild("ProvidersScreen")
+    else if section.kind = "settings" then
+        screen = m.sectionsGroup.createChild("SettingsScreen")
     else
         screen = m.sectionsGroup.createChild("BrowseScreen")
         screen.tabId = section.tabId
@@ -156,7 +159,8 @@ sub onScreenAction(event as Object)
         screen.se = action.se
         screen.ep = action.ep
         screen.resume = action.resume
-        screen.altMode = action.altMode = true
+        ' Explicit comparison: the old chained `a = b = true` form read as a bug.
+        screen.altMode = (action.altMode = true)
         pushScreen(screen)
         screen.start = true
     else if t = "close" then
@@ -263,9 +267,15 @@ end sub
 sub onLaunchArgs()
     args = m.top.launchArgs
     if args = invalid or args.contentId = invalid or args.contentId = "" then return
+    ' Roku Search and voice hand us a mediaType; a series must open as a series,
+    ' otherwise the details screen offers a play button for a whole show.
+    mediaType = ""
+    if args.mediaType <> invalid then mediaType = LCase(args.mediaType)
+    stype = 1
+    if Instr(1, mediaType, "series") > 0 or Instr(1, mediaType, "episode") > 0 or Instr(1, mediaType, "season") > 0 then stype = 2
     node = CreateObject("roSGNode", "ContentNode")
     node.title = "Loading..."
-    node.addFields({ sid: args.contentId, stype: 0, tag: "", year: "", genre: "", rating: "", durationText: "", country: "", backdrop: "", wide: "", progress: 0.0, se: 0, ep: 0, resumeAt: 0, subtitle: "" })
+    node.addFields(ItemNodeFields({ sid: args.contentId, stype: stype }))
     while m.stack.Count() > 0
         popScreen()
     end while

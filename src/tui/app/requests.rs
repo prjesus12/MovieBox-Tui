@@ -303,6 +303,14 @@ impl App {
                 self.state.is_loading = false;
                 self.state.has_search_settled = true;
                 let raw_count = items.len();
+                // Spec S6b/S6c: the service drops Hindi entries, but the search
+                // cache is read before the service runs (`search.rs:278`,
+                // `navigation.rs:170`), so a payload cached before this change
+                // would keep its Hindi rows on screen until expiry. The count
+                // above is taken first, because the pager must not act on a
+                // count the filter shrank.
+                let items =
+                    crate::language_filter::hindi_catalog_items(items, self.state.hide_hindi);
                 let mut new_results = Vec::new();
 
                 for item in items {
@@ -381,7 +389,17 @@ impl App {
                     }
                 }
 
-                if new_results.is_empty() || raw_count < 15 {
+                // S6b/L9: the Hindi filter can shorten a page, so a page shorter
+                // than the provider page size no longer proves the list ended.
+                // With the filter on, only an empty page does (the "empty page"
+                // signal iOS uses, kept honest because a non-empty page is never
+                // filtered to empty); with the filter off the count is exact.
+                let page_ended = if self.state.hide_hindi {
+                    raw_count == 0
+                } else {
+                    raw_count < 15
+                };
+                if page_ended || new_results.is_empty() {
                     self.state.search_exhausted = true;
                 }
 
@@ -895,6 +913,15 @@ impl App {
                     if details.poster_url.is_none() {
                         details.poster_url = res.cover_url.clone();
                     }
+                }
+
+                // Spec S2: the details dub list is the client state the language
+                // picker and dub switching read, so Hindi dubs are dropped here
+                // (after the merge with the previously shown subject's dubs, so
+                // no unfiltered list can slip back in).
+                if crate::config::load().hide_hindi {
+                    details.dubs =
+                        crate::language_filter::filter_dubs(std::mem::take(&mut details.dubs));
                 }
 
                 self.state.active_subject_id = Some(id.clone());
@@ -1605,6 +1632,11 @@ impl App {
 
                 let mut filtered = raw_list;
                 filtered.sort_by_key(|b| std::cmp::Reverse(b.resolution_u64()));
+                // Spec S2/S4: the picker never offers a Hindi release, unless it
+                // is the only one left, in which case the title stays playable.
+                if crate::config::load().hide_hindi {
+                    filtered = crate::language_filter::filter_releases(filtered);
+                }
 
                 let count = filtered.len();
                 if count > 0 {
@@ -1967,12 +1999,20 @@ mod tests {
         assert_eq!(details.genres, vec!["Romance", "Drama"]);
         assert_eq!(details.director.as_deref(), Some("Director Name"));
         assert_eq!(details.stars.as_deref(), Some("Actor One, Actor Two"));
-        assert_eq!(details.dubs.len(), 2);
+        // The previous subject's dubs are merged back in, minus the Hindi one:
+        // spec S2 keeps the remaining versions playable and hides the Hindi dub.
+        assert_eq!(details.dubs.len(), 1);
+        assert_eq!(details.dubs[0].language, "Original");
     }
 
     #[tokio::test]
     async fn test_search_success_preserves_page_1_order_and_sets_exhausted() {
         let mut app = App::new();
+        // With the Hindi filter off the page count is exact, which is the case
+        // this test pins: a short page ends paging. With the filter on the count
+        // can be shortened by the filter, so only an empty page ends it —
+        // `test_search_page_counts_full_pages_before_the_hindi_filter`.
+        app.state.hide_hindi = false;
         app.state.search_query.set_content("deewaniyat");
         let context = app.request_context();
         let request_id = app.state.active_search_request;
@@ -2029,6 +2069,56 @@ mod tests {
 
         assert_eq!(app.state.search_results.len(), 2);
         assert!(app.state.search_exhausted);
+    }
+
+    fn catalog_item(id: &str, title: &str) -> crate::providers::models::CatalogItem {
+        crate::providers::models::CatalogItem {
+            id: crate::providers::models::ProviderMediaId {
+                value: id.to_string(),
+                provider: ProviderKind::MovieBox,
+            },
+            title: title.to_string(),
+            media_type: crate::models::MediaType::Movie,
+            year: Some("2025".into()),
+            poster_url: None,
+            season_count: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_search_page_counts_full_pages_before_the_hindi_filter() {
+        // Spec S6b/S6c: the Hindi entries leave the listing, but the page count
+        // the pager acts on is taken before filtering, so a full page that lost
+        // its Hindi rows still proves the list continues.
+        let mut app = App::new();
+        app.state.hide_hindi = true;
+        app.state.search_query.set_content("deewaniyat");
+        let context = app.request_context();
+        let request_id = app.state.active_search_request;
+        let page = (0..15)
+            .map(|index| {
+                if index % 5 == 0 {
+                    catalog_item(&index.to_string(), &format!("[Hindi] Deewaniyat {index}"))
+                } else {
+                    catalog_item(&index.to_string(), &format!("Deewaniyat {index}"))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        app.handle_requests(Action::SearchSuccess {
+            context,
+            request_id,
+            query: "deewaniyat".into(),
+            page: 1,
+            items: page,
+        })
+        .await;
+
+        assert_eq!(app.state.search_results.len(), 12);
+        assert!(
+            !app.state.search_exhausted,
+            "a full page with Hindi rows dropped still pages on"
+        );
     }
 
     #[tokio::test]

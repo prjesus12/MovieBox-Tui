@@ -39,6 +39,9 @@ struct SourceRequest: Identifiable, Hashable {
     let episodeTitle: String?
     /// Resume position in seconds (0 for a fresh start).
     let startAt: Double
+    /// Dub `subject_id`s, forwarded to the caption lookup so every dub's
+    /// captions reach the picker the way they already do in the terminal.
+    var siblingIds: [String] = []
 
     /// "S1 E3" or "Movie", used by the source picker header.
     var contextLabel: String {
@@ -71,6 +74,47 @@ struct PlaybackRequest: Identifiable, Hashable {
     let startAt: Double
     /// Quality / source label for the player HUD, e.g. "1080p · Direct".
     let releaseLabel: String
+    /// Dub `subject_id`s, forwarded to the caption lookup.
+    var siblingIds: [String] = []
+    /// Ordered candidates for the same title still untried, in the order
+    /// `Format.playableDirectFiles` produced. The player walks them when the
+    /// current stream fails; they are not part of the request's identity.
+    var alternatives: [MobileRelease] = []
+}
+
+// MARK: - Building attempts
+
+extension PlaybackRequest {
+    /// A request for one more candidate of the title `base` already describes.
+    ///
+    /// `startAt` is the resume position to carry into the new attempt and
+    /// `alternatives` are the candidates left after this one.
+    static func attempt(
+        for release: MobileRelease,
+        basedOn base: PlaybackRequest,
+        startAt: Double,
+        alternatives: [MobileRelease]
+    ) -> PlaybackRequest? {
+        guard let raw = release.url, let url = URL(string: raw) else { return nil }
+        return PlaybackRequest(
+            url: url,
+            headers: release.headers,
+            title: base.title,
+            contextLabel: base.contextLabel,
+            posterUrl: base.posterUrl,
+            provider: base.provider,
+            subjectId: base.subjectId,
+            isSeries: base.isSeries,
+            year: base.year,
+            season: base.season,
+            episode: base.episode,
+            resourceId: release.resourceId,
+            startAt: startAt,
+            releaseLabel: Format.releaseLabel(release),
+            siblingIds: base.siblingIds,
+            alternatives: alternatives
+        )
+    }
 }
 
 @MainActor
@@ -271,6 +315,7 @@ final class AppModel: ObservableObject {
     func loadCaptions(
         subjectId: String,
         resourceId: String,
+        siblingIds: [String],
         season: UInt32,
         episode: UInt32
     ) async throws -> [MobileSubtitle] {
@@ -278,6 +323,29 @@ final class AppModel: ObservableObject {
             try $0.captions(
                 subjectId: subjectId,
                 resourceId: resourceId,
+                siblingIds: siblingIds,
+                season: season,
+                episode: episode
+            )
+        }
+    }
+
+    /// Online subtitles for the title being watched, Spanish first.
+    ///
+    /// An empty result is a normal answer (no IMDb match or no network), not an
+    /// error: the caller keeps the provider captions it already has.
+    func searchOnlineSubtitles(
+        title: String,
+        year: String,
+        isSeries: Bool,
+        season: UInt32,
+        episode: UInt32
+    ) async -> [MobileSubtitle] {
+        await Bridge.shared.performSync {
+            $0.searchOnlineSubtitles(
+                title: title,
+                year: year.isEmpty ? nil : year,
+                isSeries: isSeries,
                 season: season,
                 episode: episode
             )
@@ -445,7 +513,8 @@ final class AppModel: ObservableObject {
             season: season,
             episode: episode,
             episodeTitle: episodeTitle,
-            startAt: startAt
+            startAt: startAt,
+            siblingIds: details.siblingSubjectIds
         )
     }
 
@@ -509,9 +578,8 @@ final class AppModel: ObservableObject {
                 season: season,
                 episode: episode
             )
-            guard let release = releases.first(where: {
-                $0.isDirectFile && $0.url?.isEmpty == false
-            }) else {
+            let candidates = Format.playableDirectFiles(releases)
+            guard let release = candidates.first else {
                 // Nothing directly playable: fall back to the picker so the
                 // viewer sees why instead of a silent failure.
                 banner = "No directly playable source for this title."
@@ -524,10 +592,6 @@ final class AppModel: ObservableObject {
                 return
             }
 
-            let label = [release.quality, release.sourceLabel]
-                .compactMap { $0 }
-                .filter { !$0.isEmpty }
-                .joined(separator: " · ")
             play(
                 PlaybackRequest(
                     url: streamURL,
@@ -543,7 +607,9 @@ final class AppModel: ObservableObject {
                     episode: request.episode,
                     resourceId: release.resourceId,
                     startAt: request.startAt,
-                    releaseLabel: label.isEmpty ? release.sourceLabel : label
+                    releaseLabel: Format.releaseLabel(release),
+                    siblingIds: details.siblingSubjectIds,
+                    alternatives: Format.fallbackCandidates(after: release, in: candidates)
                 )
             )
         } catch {

@@ -1,0 +1,12 @@
+{
+  "rootDir": "app",
+  "files": [
+    "source/**/*",
+    "components/**/*"
+  ],
+  "stagingDir": "build/staging",
+  "createPackage": false,
+  "copyToStaging": false,
+  "sourceMap": false,
+  "diagnosticLevel": "warn"
+}

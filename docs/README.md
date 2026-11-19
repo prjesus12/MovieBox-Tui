@@ -53,6 +53,7 @@
 | [Batch Downloads](downloads.md) | Multi-segment download engine, range resume, and folder layout |
 | [Stremio Addons](addons-mode.md) | Addon manifest installation, catalog browsing, and stream resolution |
 | [Live TV & IPTV](tv-mode.md) | M3U playlist manager, channel parsing, and live stream playback |
+| [Roku Channel](roku.md) | BrightScript channel layout, packaging, settings, deep links, and cache |
 
 ### Architecture & Internals
 

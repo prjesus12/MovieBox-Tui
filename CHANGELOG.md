@@ -12,6 +12,17 @@
   - Prevented a deadlock in Windows in-app self-update where the helper script hung in `:wait_loop` due to `DETACHED_PROCESS` breaking anonymous pipe handling in `cmd.exe` (#240).
   - Standardized helper script calls to `%SystemRoot%\System32\tasklist.exe` and `%SystemRoot%\System32\timeout.exe` to guarantee system utility resolution, and increased move retry attempts to 10 for resilience against antivirus background locks (#240).
 
+### Added
+- **iOS Playback**:
+  - A failed source no longer dead-ends: the player reports the underlying `AVError` domain and code and automatically tries the next candidate of the same title, up to two extra attempts, carrying the resume position and reloading subtitles for the new release.
+  - A source is validated before it plays: a candidate without a decodable video track, or one that reaches playback with an audio-only surface, is skipped through the same bounded chain instead of leaving the system's video placeholder on screen. When no candidate has a playable video track the overlay says so and reports how many sources were tried.
+- **Subtitles**:
+  - Added an online subtitle search backed by the keyless OpenSubtitles v3 Stremio addon. The Rust core resolves the title's IMDb id, fetches the matching subtitles and orders them Spanish first, English second, then the rest, so the TUI and the iOS client share one implementation.
+  - The iOS player now offers a "Search subtitles online" section next to the provider captions, reports an empty answer instead of failing, and forwards the dub sibling ids so its caption list matches the terminal client.
+- **Language Filtering**:
+  - Added a `hide_hindi` preference (on by default) that removes Hindi releases, Hindi audio tracks and Hindi catalog items from every client through one core filter, with a Content Modes toggle in the settings hub. A title that exists only in Hindi is still offered, so the preference can never empty a picker or a page.
+  - Dub markers such as `[Hindi]` no longer appear in any listing title: the iOS grids, search results, favorites and library show the cleaned title, and detection always runs on the raw title so the filter keeps working.
+
 ## [0.1.29] - 2026-11-05
 
 ### Fixed

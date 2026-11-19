@@ -376,6 +376,78 @@ function MB_Post(pathAndQuery as String, body as String) as Object
 end function
 
 ' ---------------------------------------------------------------------------
+' Disk cache for read-only catalogue calls
+'
+' Only payloads that are safe to reuse go through here: the homepage, search
+' results and title details. Signed play-info is never cached because the CDN
+' URLs it returns expire.
+' ---------------------------------------------------------------------------
+
+function MB_CacheKey(text as String) as String
+    out = ""
+    lower = LCase(text)
+    for i = 1 to Len(lower)
+        ch = Mid(lower, i, 1)
+        code = Asc(ch)
+        if (code >= 97 and code <= 122) or (code >= 48 and code <= 57) then
+            out = out + ch
+        else
+            out = out + "-"
+        end if
+    end for
+    if Len(out) > 90 then out = Right(out, 90)
+    return out
+end function
+
+function MB_CacheRead(key as String, ttlSeconds as Integer) as Dynamic
+    path = "tmp:/cache/" + key + ".json"
+    fs = CreateObject("roFileSystem")
+    if not fs.Exists(path) then return invalid
+    text = ReadAsciiFile(path)
+    if text = "" then return invalid
+    entry = ParseJson(text)
+    if entry = invalid then return invalid
+    ts = MB_Int(entry.ts)
+    if ts <= 0 then return invalid
+    if MB_NowSeconds() - ts >= ttlSeconds then return invalid
+    return entry.data
+end function
+
+sub MB_CacheWrite(key as String, data as Dynamic)
+    ' tmp: is small and shared with the downloaded subtitles, so keep the cache
+    ' bounded and skip payloads that would dominate it.
+    text = FormatJson({ ts: MB_NowSeconds(), data: data })
+    if Len(text) > 400000 then return
+    fs = CreateObject("roFileSystem")
+    if not fs.Exists("tmp:/cache") then fs.CreateDirectory("tmp:/cache")
+    entries = fs.ListDir("tmp:/cache")
+    if entries <> invalid and entries.Count() >= 60 then
+        for each name in entries
+            fs.Delete("tmp:/cache/" + name)
+        end for
+    end if
+    WriteAsciiFile("tmp:/cache/" + key + ".json", text)
+end sub
+
+function MB_GetCached(pathAndQuery as String, ttlSeconds as Integer) as Object
+    key = MB_CacheKey("g" + pathAndQuery)
+    data = MB_CacheRead(key, ttlSeconds)
+    if data <> invalid then return { ok: true, data: data, cached: true }
+    res = MB_Get(pathAndQuery)
+    if res.ok then MB_CacheWrite(key, res.data)
+    return res
+end function
+
+function MB_PostCached(pathAndQuery as String, body as String, ttlSeconds as Integer) as Object
+    key = MB_CacheKey("p" + pathAndQuery + body)
+    data = MB_CacheRead(key, ttlSeconds)
+    if data <> invalid then return { ok: true, data: data, cached: true }
+    res = MB_Post(pathAndQuery, body)
+    if res.ok then MB_CacheWrite(key, res.data)
+    return res
+end function
+
+' ---------------------------------------------------------------------------
 ' Normalisation helpers
 ' ---------------------------------------------------------------------------
 
@@ -446,17 +518,20 @@ end function
 
 ' Content the channel hides: Hindi dubs/versions and Indian-origin titles.
 function MB_IsHiddenLanguage(text as String) as Boolean
+    if not HideHindiActive() then return false
     return Instr(1, LCase(text), "hindi") > 0
 end function
 
 ' Indian-origin titles are dropped outright; Hindi dubs of foreign titles are kept
 ' but shown as the original (details/playback redirect to the original version).
 function MB_IsHiddenSubject(country as String) as Boolean
+    if not HideHindiActive() then return false
     return LCase(country.Trim()) = "india"
 end function
 
 ' Row titles from the regional feed that only carry Indian content.
 function MB_IsHiddenRow(title as String) as Boolean
+    if not HideHindiActive() then return false
     ' India-curated banners are named like "IN Banner" or "Banner_movie tab_IN".
     for each token in title.Replace("_", " ").Split(" ")
         if token = "IN" then return true
@@ -521,7 +596,7 @@ function MB_ItemNode(item as Object) as Object
     node.title = item.title
     node.description = item.description
     node.HDPosterUrl = item.poster
-    node.addFields({
+    node.addFields(ItemNodeFields({
         sid: item.id
         stype: item.stype
         tag: item.tag
@@ -532,11 +607,7 @@ function MB_ItemNode(item as Object) as Object
         country: item.country
         backdrop: item.backdrop
         wide: item.wide
-        progress: 0.0
-        se: 0
-        ep: 0
-        resumeAt: 0
-        subtitle: ""
-    })
+        AUDIO_GUIDE_TEXT: ItemAudioGuide(item)
+    }))
     return node
 end function

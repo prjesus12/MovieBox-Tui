@@ -1,3 +1,4 @@
+import CoreGraphics
 import SwiftUI
 
 // MARK: - Theme
@@ -49,6 +50,188 @@ enum Format {
         let digits = quality.compactMap { $0.isNumber ? $0 : nil }
         if digits.isEmpty { return 0 }
         return Int(String(digits)) ?? 0
+    }
+
+    /// How reliably the system player decodes a codec: lower opens first.
+    ///
+    /// `AVPlayer` decodes H.264 on every device it runs on, while MovieBox's 4K
+    /// entries are usually 10-bit HEVC or Dolby Vision and can play their audio
+    /// with no picture at all. AV1/VP9 have no hardware path here, so they rank
+    /// last. An unlabelled codec sits in the middle: unknown, not promoted.
+    static func codecRank(_ codec: String?) -> Int {
+        guard let codec else { return 1 }
+        let normalized = codec.lowercased().filter { $0.isLetter || $0.isNumber }
+        guard !normalized.isEmpty else { return 1 }
+        if normalized.contains("avc") || normalized.contains("h264") || normalized.contains("x264") {
+            return 0
+        }
+        if normalized.contains("av1") || normalized.contains("vp9") {
+            return 2
+        }
+        return 1
+    }
+
+    /// Resolution preference for playback, lower first: 1080p, 720p, then
+    /// everything else, with 4K last because the 4K candidates are the ones
+    /// that arrive as 10-bit HEVC or Dolby Vision.
+    static func playbackQualityRank(_ quality: String?) -> Int {
+        let rank = qualityRank(quality)
+        if rank >= 2160 { return 3 }
+        if rank >= 1080 { return 0 }
+        if rank >= 720 { return 1 }
+        return 2
+    }
+
+    /// Direct files the system player can open, best candidate first.
+    ///
+    /// Codec wins over resolution, resolution breaks the codec tie, and the
+    /// provider order breaks everything left so the order stays deterministic.
+    static func playableDirectFiles(_ releases: [MobileRelease]) -> [MobileRelease] {
+        releases
+            .filter { $0.isDirectFile && $0.url?.isEmpty == false }
+            .enumerated()
+            .sorted { left, right in
+                let leftRank = codecRank(left.element.codec) * 4
+                    + playbackQualityRank(left.element.quality)
+                let rightRank = codecRank(right.element.codec) * 4
+                    + playbackQualityRank(right.element.quality)
+                if leftRank != rightRank { return leftRank < rightRank }
+                return left.offset < right.offset
+            }
+            .map(\.element)
+    }
+
+    /// HUD label for one candidate, e.g. "1080p · Direct".
+    static func releaseLabel(_ release: MobileRelease) -> String {
+        let label = [release.quality, release.sourceLabel]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+        return label.isEmpty ? release.sourceLabel : label
+    }
+
+    // MARK: - Playback fallback
+
+    /// Extra sources tried after the first one fails. Bounded so a broken title
+    /// cannot walk through every candidate it has (S3/S4).
+    static let maxFallbackAttempts = 2
+
+    /// The candidates to try after `release` fails, in the order
+    /// `playableDirectFiles` produced: only the ones that come after it, and
+    /// never the URL already playing.
+    static func fallbackCandidates(
+        after release: MobileRelease,
+        in candidates: [MobileRelease]
+    ) -> [MobileRelease] {
+        let remaining: ArraySlice<MobileRelease>
+        if let index = candidates.firstIndex(of: release) {
+            remaining = candidates[(index + 1)...]
+        } else {
+            // The chosen release is not from this list: keep all of it, the URL
+            // filter below still drops the one already playing.
+            remaining = candidates[...]
+        }
+        return remaining.filter { $0.url != release.url }
+    }
+
+    /// The next source to try after a failed attempt, or `nil` when the chain
+    /// must stop.
+    ///
+    /// Stops when the attempt budget is spent, when no candidate is left, and
+    /// for any candidate whose URL this session already tried.
+    static func nextFallback(
+        alternatives: [MobileRelease],
+        attemptedURLs: Set<URL>,
+        extraAttempts: Int
+    ) -> MobileRelease? {
+        guard extraAttempts < maxFallbackAttempts else { return nil }
+        return alternatives.first { release in
+            guard let raw = release.url, let url = URL(string: raw) else { return false }
+            return !attemptedURLs.contains(url)
+        }
+    }
+
+    // MARK: - Video suitability
+
+    /// What the asset says about its own picture, before anything is played
+    /// (S6a). Apart from `usable`, the case itself is the reason the candidate
+    /// is replaced through the fallback chain.
+    enum VideoVerdict: Equatable {
+        /// At least one video track reports `isDecodable`.
+        case usable
+        /// The asset carries no video track at all.
+        case noVideoTrack
+        /// Video tracks exist, but the system reports none of them decodable.
+        case undecodable
+
+        var isUsable: Bool { self == .usable }
+
+        /// Sentence the overlay leads with when this candidate is rejected.
+        var reason: String {
+            switch self {
+            case .usable:
+                return "This source has a decodable video track."
+            case .noVideoTrack:
+                return "This source has no video track."
+            case .undecodable:
+                return "This device cannot decode this source’s video."
+            }
+        }
+    }
+
+    /// Decide whether a candidate can put a picture on screen from what
+    /// AVFoundation reported about its tracks.
+    ///
+    /// The signal is `AVAssetTrack.isDecodable`, never a list of fourCCs, so
+    /// `hev1`, `av01` and `vp09` all reach the same rule.
+    static func videoVerdict(hasVideoTrack: Bool, anyDecodable: Bool) -> VideoVerdict {
+        guard hasVideoTrack else { return .noVideoTrack }
+        return anyDecodable ? .usable : .undecodable
+    }
+
+    /// A mounted item whose presentation size has no height is delivering audio
+    /// only, which AVKit renders as a bare placeholder (S6b).
+    static func isAudioOnly(presentationHeight: CGFloat) -> Bool {
+        !(presentationHeight > 0)
+    }
+
+    /// Headline for an exhausted chain that ran out of candidates with a
+    /// playable video track, or `nil` when the chain ended on real errors and
+    /// the last error has to stay on screen (S7).
+    static func videoExhaustedNotice(triedCount: Int, hadVideoRejection: Bool) -> String? {
+        guard hadVideoRejection else { return nil }
+        let sources = triedCount == 1 ? "1 source" : "\(triedCount) sources"
+        return "No source of this title has a playable video track — \(sources) tried."
+    }
+
+    /// Technical one-liner for a failed playback attempt: the error domain and
+    /// code plus the underlying description, which is what tells a container
+    /// rejection apart from a 403 or a timeout (S2).
+    static func failureDetail(_ error: Error?) -> String {
+        guard let error else { return "No error detail reported by the system player." }
+        let failure = error as NSError
+        var parts = ["\(failure.domain) \(failure.code)"]
+        var described = false
+        if let underlying = failure.userInfo[NSUnderlyingErrorKey] as? NSError {
+            if underlying.domain != failure.domain {
+                parts.append("\(underlying.domain) \(underlying.code)")
+            }
+            let description = underlying.localizedDescription
+            if !description.isEmpty {
+                parts.append(description)
+                described = true
+            }
+        }
+        if let reason = failure.localizedFailureReason, !reason.isEmpty {
+            parts.append(reason)
+            described = true
+        }
+        if !described, !failure.localizedDescription.isEmpty {
+            // No underlying reason to report: the item's own sentence is all
+            // the system gave us, and the overlay must never be detail-less.
+            parts.append(failure.localizedDescription)
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

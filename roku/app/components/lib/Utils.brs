@@ -60,10 +60,13 @@ function StoreReadArray(key as String) as Object
     return []
 end function
 
-sub StoreWriteArray(key as String, data as Object)
+' flush=false keeps the write in memory. Callers that save several times a
+' minute (playback progress) flush only on pause, finish or exit: the registry
+' is flash-backed, so a flush per position tick is needless wear.
+sub StoreWriteArray(key as String, data as Object, flush as Boolean)
     reg = Store()
     reg.Write(key, FormatJson(data))
-    reg.Flush()
+    if flush then reg.Flush()
 end sub
 
 function PrefGet(name as String, fallback as String) as String
@@ -95,12 +98,48 @@ function SnapshotItem(src as Object) as Object
     }
 end function
 
+' Every poster/episode tile carries these fields. One list, so a new field cannot
+' be added to three builders and forgotten in the fourth.
+function ItemNodeFields(values as Object) as Object
+    fields = {
+        sid: ""
+        stype: 0
+        tag: ""
+        year: ""
+        genre: ""
+        rating: ""
+        durationText: ""
+        country: ""
+        backdrop: ""
+        wide: ""
+        progress: 0.0
+        se: 0
+        ep: 0
+        resumeAt: 0
+        subtitle: ""
+        AUDIO_GUIDE_TEXT: ""
+    }
+    if values <> invalid then
+        for each key in values
+            fields[key] = values[key]
+        end for
+    end if
+    return fields
+end function
+
+' RowList speaks the focused tile through AUDIO_GUIDE_TEXT (falling back to
+' TITLE), so give it one sentence worth hearing instead of a bare name.
+function ItemAudioGuide(item as Object) as String
+    if item = invalid then return ""
+    return JoinNonEmpty([item.title, item.year, item.duration], ", ")
+end function
+
 function NodeFromSnapshot(item as Object) as Object
     node = CreateObject("roSGNode", "ContentNode")
     node.title = item.title
     node.description = item.description
     node.HDPosterUrl = item.poster
-    node.addFields({
+    node.addFields(ItemNodeFields({
         sid: item.id
         stype: item.stype
         tag: item.tag
@@ -108,15 +147,9 @@ function NodeFromSnapshot(item as Object) as Object
         genre: item.genre
         rating: item.rating
         durationText: item.duration
-        country: ""
         backdrop: item.backdrop
-        wide: ""
-        progress: 0.0
-        se: 0
-        ep: 0
-        resumeAt: 0
-        subtitle: ""
-    })
+        AUDIO_GUIDE_TEXT: ItemAudioGuide(item)
+    }))
     return node
 end function
 
@@ -132,7 +165,7 @@ function HistoryFind(id as String) as Dynamic
     return invalid
 end function
 
-sub HistorySave(item as Object, se as Integer, ep as Integer, position as Integer, duration as Integer)
+sub HistorySave(item as Object, se as Integer, ep as Integer, position as Integer, duration as Integer, flush as Boolean)
     entries = HistoryAll()
     kept = []
     for each entry in entries
@@ -157,7 +190,7 @@ sub HistorySave(item as Object, se as Integer, ep as Integer, position as Intege
     for each entry in kept
         if result.Count() < 40 then result.Push(entry)
     end for
-    StoreWriteArray("history", result)
+    StoreWriteArray("history", result, flush)
 end sub
 
 function HistoryFindIn(entries as Object, id as String) as Dynamic
@@ -172,7 +205,7 @@ sub HistoryRemove(id as String)
     for each entry in HistoryAll()
         if entry.item <> invalid and entry.item.id <> id then kept.Push(entry)
     end for
-    StoreWriteArray("history", kept)
+    StoreWriteArray("history", kept, true)
 end sub
 
 function FavoritesAll() as Object
@@ -199,14 +232,14 @@ function FavoriteToggle(item as Object) as Boolean
         end if
     end for
     if found then
-        StoreWriteArray("favorites", kept)
+        StoreWriteArray("favorites", kept, true)
         return false
     end if
     result = [item]
     for each fav in kept
         if result.Count() < 100 then result.Push(fav)
     end for
-    StoreWriteArray("favorites", result)
+    StoreWriteArray("favorites", result, true)
     return true
 end function
 
@@ -219,8 +252,15 @@ function HistoryInProgress(entry as Object) as Boolean
 end function
 
 ' Mirrors the API-side filter for titles already saved on the device.
+' Hiding Hindi releases is the shipped default but it is a preference now:
+' the Settings screen turns it off for anyone who wants the whole catalogue.
+function HideHindiActive() as Boolean
+    return PrefGet("hideHindi", "on") <> "off"
+end function
+
 function IsHiddenItem(item as Dynamic) as Boolean
     if item = invalid or item.tag = invalid then return false
+    if not HideHindiActive() then return false
     return Instr(1, LCase(item.tag), "hindi") > 0
 end function
 
@@ -283,7 +323,7 @@ function AddonsAll() as Object
 end function
 
 sub AddonsSave(addons as Object)
-    StoreWriteArray("addons", addons)
+    StoreWriteArray("addons", addons, true)
 end sub
 
 ' Adds or replaces (same manifest URL) an addon; returns false when it was already there.

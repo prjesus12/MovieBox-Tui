@@ -1,0 +1,55 @@
+name: Roku
+
+on:
+  pull_request:
+    paths:
+      - 'roku/**'
+      - '.github/workflows/roku.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'roku/**'
+      - '.github/workflows/roku.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-roku:
+    name: Validate and package Roku channel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The channel has no unit tests; brighterscript is the only static check
+      # that runs before a device does.
+      - name: Validate BrightScript
+        run: npx --yes brighterscript@0.73.8 bsc --project roku/bsconfig.json
+
+      - name: Package channel
+        run: roku/scripts/package.sh
+
+      - name: Verify package shape
+        run: |
+          set -euo pipefail
+          unzip -l roku/build/moviebox-roku.zip | grep -q ' manifest$' \
+            || { echo 'manifest is not at the zip root'; exit 1; }
+          unzip -l roku/build/moviebox-roku.zip | grep -q 'components/MainScene.xml' \
+            || { echo 'components are missing from the package'; exit 1; }
+
+      - name: Upload channel
+        uses: actions/upload-artifact@v4
+        with:
+          name: moviebox-roku
+          path: roku/build/moviebox-roku.zip
+          if-no-files-found: error
