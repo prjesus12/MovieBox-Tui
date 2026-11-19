@@ -275,7 +275,7 @@ sub onLaunchArgs()
     if Instr(1, mediaType, "series") > 0 or Instr(1, mediaType, "episode") > 0 or Instr(1, mediaType, "season") > 0 then stype = 2
     node = CreateObject("roSGNode", "ContentNode")
     node.title = "Loading..."
-    node.addFields({ sid: args.contentId, stype: stype, tag: "", year: "", genre: "", rating: "", durationText: "", country: "", backdrop: "", wide: "", progress: 0.0, se: 0, ep: 0, resumeAt: 0, subtitle: "" })
+    node.addFields(ItemNodeFields({ sid: args.contentId, stype: stype }))
     while m.stack.Count() > 0
         popScreen()
     end while

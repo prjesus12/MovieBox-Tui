@@ -98,12 +98,40 @@ function SnapshotItem(src as Object) as Object
     }
 end function
 
+' Every poster/episode tile carries these fields. One list, so a new field cannot
+' be added to three builders and forgotten in the fourth.
+function ItemNodeFields(values as Object) as Object
+    fields = {
+        sid: ""
+        stype: 0
+        tag: ""
+        year: ""
+        genre: ""
+        rating: ""
+        durationText: ""
+        country: ""
+        backdrop: ""
+        wide: ""
+        progress: 0.0
+        se: 0
+        ep: 0
+        resumeAt: 0
+        subtitle: ""
+    }
+    if values <> invalid then
+        for each key in values
+            fields[key] = values[key]
+        end for
+    end if
+    return fields
+end function
+
 function NodeFromSnapshot(item as Object) as Object
     node = CreateObject("roSGNode", "ContentNode")
     node.title = item.title
     node.description = item.description
     node.HDPosterUrl = item.poster
-    node.addFields({
+    node.addFields(ItemNodeFields({
         sid: item.id
         stype: item.stype
         tag: item.tag
@@ -111,15 +139,8 @@ function NodeFromSnapshot(item as Object) as Object
         genre: item.genre
         rating: item.rating
         durationText: item.duration
-        country: ""
         backdrop: item.backdrop
-        wide: ""
-        progress: 0.0
-        se: 0
-        ep: 0
-        resumeAt: 0
-        subtitle: ""
-    })
+    }))
     return node
 end function
 

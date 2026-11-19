@@ -596,7 +596,7 @@ function MB_ItemNode(item as Object) as Object
     node.title = item.title
     node.description = item.description
     node.HDPosterUrl = item.poster
-    node.addFields({
+    node.addFields(ItemNodeFields({
         sid: item.id
         stype: item.stype
         tag: item.tag
@@ -607,11 +607,6 @@ function MB_ItemNode(item as Object) as Object
         country: item.country
         backdrop: item.backdrop
         wide: item.wide
-        progress: 0.0
-        se: 0
-        ep: 0
-        resumeAt: 0
-        subtitle: ""
-    })
+    }))
     return node
 end function

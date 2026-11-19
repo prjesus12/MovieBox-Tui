@@ -106,7 +106,7 @@ sub onDetails()
     if d.poster = "" then item.HDPosterUrl = m.top.item.HDPosterUrl
     backdrop = d.backdrop
     if backdrop = "" then backdrop = m.top.item.backdrop
-    item.addFields({ sid: d.id, stype: d.stype, tag: d.tag, year: d.year, genre: d.genre, rating: d.rating, durationText: d.duration, country: d.country, backdrop: backdrop, wide: "", progress: 0.0, se: 0, ep: 0, resumeAt: 0, subtitle: "" })
+    item.addFields(ItemNodeFields({ sid: d.id, stype: d.stype, tag: d.tag, year: d.year, genre: d.genre, rating: d.rating, durationText: d.duration, country: d.country, backdrop: backdrop }))
     m.item = item
     showBasics(item)
     if d.posterLarge <> "" then m.poster.uri = d.posterLarge
