@@ -103,3 +103,14 @@ L11 (decision): accessibility scope from the Roku text-to-speech reference —
 `RowList`/`MarkupGrid`/`LabelList` speak `ContentMetaData::AUDIO_GUIDE_TEXT` (else
 `TITLE`), so only the item nodes were changed. Player overlay and toasts stay
 silent and are documented as a limitation rather than guessed at.
+
+L12 (review 1): lineage `review-5fb19c16152cafc9`, lenses risk/resilience/
+readability over `41f3ed7..05782cd`. Approved; authority burned. Three
+non-blocking findings: R2-001 (ItemNodeFields comment overclaimed),
+R2-002 (AUDIO_GUIDE_TEXT written twice), R4-001 (package.sh did not exclude
+__MACOSX).
+
+L13 (review 2): `86c641e` closes those three findings. Red/green proof for
+R4-001: the old zip patterns admitted 4 `__MACOSX` entries, the new ones admit 0
+while stray directories were present. Lineage `review-4708eeaddae71d29`,
+lenses resilience/readability, approved with no findings; authority burned.
