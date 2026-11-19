@@ -316,7 +316,9 @@ function itemDigest(item as Object) as String
 end function
 
 function localDigest() as String
-    parts = ["hindi=" + PrefGet("hideHindi", "on")]
+    ' The tab is part of the key: a cached screen that ever serves another context
+    ' must not be able to reuse rows built for the previous one.
+    parts = ["hindi=" + PrefGet("hideHindi", "on") + ";tab=" + m.top.tabId]
     for each entry in HistoryAll()
         if entry <> invalid and entry.item <> invalid then
             position = "0"
