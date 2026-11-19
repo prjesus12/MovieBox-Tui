@@ -6,6 +6,9 @@ sub runRequest()
     req = m.top.request
     if req = invalid then req = {}
     action = MB_Str(req.action)
+    ' A page filters hundreds of subjects and each one asks for the Hindi preference;
+    ' read the registry once per request instead of several times per title.
+    m.hideHindiMemo = PrefGet("hideHindi", "on") <> "off"
     result = invalid
     if action = "home" then
         result = loadHome(MB_Str(req.tabId))
@@ -120,24 +123,70 @@ end function
 ' what they carry, never by the type label: the API reuses CUSTOM and plain subject
 ' groups for the same catalogue and keeps adding type names the channel has never
 ' heard of.
+'
+' The raw page is 200-600 KB of JSON, most of it fields the channel never reads.
+' Caching it raw meant Home (the biggest page, and the one every category tab
+' borrows from) was always over the cache limit and was downloaded and parsed
+' again on every tab switch. The compact rows are a fraction of that and cache.
 function pageRows(tabId as String) as Object
     page = { ok: false, rows: [], error: "MovieBox returned an empty page" }
+    key = MB_CacheKey("rows-tab-" + tabId)
     ' Catalogue pages tolerate a short staleness window; 30 minutes keeps a tab
     ' switch instant without showing a yesterday's home page.
-    res = MB_GetCached("/wefeed-mobile-bff/tab-operating?page=1&tabId=" + tabId + "&version=", 1800)
+    cached = MB_CacheRead(key, 1800)
+    if Type(cached) = "roArray" and cached.Count() > 0 then
+        page.ok = true
+        page.rows = finishRows(cached)
+        return page
+    end if
+    res = MB_Get("/wefeed-mobile-bff/tab-operating?page=1&tabId=" + tabId + "&version=")
     if not res.ok then
-        page.error = res.error
+        page.error = MB_Str(res.error)
         return page
     end if
     groups = invalid
     if Type(res.data) = "roAssociativeArray" then groups = res.data.items
     if groups = invalid then return page
-    page.ok = true
+    compact = []
     for each group in asList(groups)
         row = rowFromGroup(group)
-        if row <> invalid then page.rows.Push(row)
+        if row <> invalid and row.raw.Count() > 0 then compact.Push(row)
     end for
+    if compact.Count() > 0 then MB_CacheWrite(key, compact)
+    page.ok = true
+    page.rows = finishRows(compact)
     return page
+end function
+
+' Adds what depends on the viewer's preferences, so a cached page follows the
+' Hindi setting as soon as it changes.
+function finishRows(rows as Object) as Object
+    out = []
+    for each row in rows
+        if Type(row) = "roAssociativeArray" and Type(row.raw) = "roArray" then
+            rawTitle = MB_Str(row.rawTitle)
+            keyTitle = MB_Str(row.keyTitle)
+            out.Push({ title: cleanRowTitle(keyTitle), keyTitle: keyTitle, kind: MB_Str(row.kind), allowed: not MB_IsHiddenRow(rawTitle), raw: row.raw })
+        end if
+    end for
+    return out
+end function
+
+sub pushSubject(raw as Object, s as Dynamic)
+    subject = compactSubject(s)
+    if subject <> invalid then raw.Push({ subject: subject, wide: "" })
+end sub
+
+' Keeps only the subject fields MB_NormalizeSubject reads.
+function compactSubject(s as Dynamic) as Dynamic
+    if Type(s) <> "roAssociativeArray" then return invalid
+    out = {}
+    for each name in ["subjectId", "id", "subjectType", "hasResource", "title", "countryName", "coverUrl", "imdbRatingValue", "imdbRate", "releaseDate", "genre", "duration", "description"]
+        if s[name] <> invalid then out[name] = s[name]
+    end for
+    if Type(s.cover) = "roAssociativeArray" then out.cover = { url: MB_Str(s.cover.url) }
+    if Type(s.stills) = "roAssociativeArray" then out.stills = { url: MB_Str(s.stills.url) }
+    return out
 end function
 
 ' A group can arrive as an object instead of an array; iterating an object yields
@@ -157,7 +206,7 @@ function rowFromGroup(group as Dynamic) as Dynamic
     if Type(group) <> "roAssociativeArray" then return invalid
     title = MB_Html(MB_Str(group.title)).Trim()
     ' Hidden rows are matched on the raw title: the banner row is renamed below.
-    allowed = not MB_IsHiddenRow(title)
+    rawTitle = title
     kind = "poster"
     raw = []
     gtype = MB_Str(group.type)
@@ -169,7 +218,7 @@ function rowFromGroup(group as Dynamic) as Dynamic
                 if Type(b) = "roAssociativeArray" and Type(b.subject) = "roAssociativeArray" then
                     wideUrl = ""
                     if Type(b.image) = "roAssociativeArray" then wideUrl = MB_Str(b.image.url)
-                    raw.Push({ subject: b.subject, wide: wideUrl })
+                    raw.Push({ subject: compactSubject(b.subject), wide: wideUrl })
                 end if
             end for
         end if
@@ -178,7 +227,7 @@ function rowFromGroup(group as Dynamic) as Dynamic
             tabs = asList(group.rankingListData.items)
             if tabs.Count() > 0 and Type(tabs[0]) = "roAssociativeArray" then
                 for each s in asList(tabs[0].subjects)
-                    raw.Push({ subject: s, wide: "" })
+                    pushSubject(raw, s)
                 end for
             end if
         end if
@@ -193,7 +242,7 @@ function rowFromGroup(group as Dynamic) as Dynamic
                 ' Only the ones that carry a subject can be opened by this channel;
                 ' the rest point at screens it does not have.
                 if Type(c) = "roAssociativeArray" and Type(c.subject) = "roAssociativeArray" then
-                    custom.Push({ subject: c.subject, wide: "" })
+                    custom.Push({ subject: compactSubject(c.subject), wide: "" })
                 end if
             end for
         end if
@@ -202,11 +251,11 @@ function rowFromGroup(group as Dynamic) as Dynamic
                 raw.Push(entry)
             end for
             for each s in asList(group.subjects)
-                raw.Push({ subject: s, wide: "" })
+                pushSubject(raw, s)
             end for
         else
             for each s in asList(group.subjects)
-                raw.Push({ subject: s, wide: "" })
+                pushSubject(raw, s)
             end for
             for each entry in custom
                 raw.Push(entry)
@@ -215,7 +264,9 @@ function rowFromGroup(group as Dynamic) as Dynamic
     end if
     ' The dedupe key keeps the row title as sent: cleaning it can collapse two
     ' different rows to the same label and hide their titles from each other.
-    return { title: cleanRowTitle(title), keyTitle: title, kind: kind, allowed: allowed, raw: raw }
+    ' Only plain values: the row is cached as is, and finishRows adds the display
+    ' title and the preference-dependent visibility on every read.
+    return { rawTitle: rawTitle, keyTitle: title, kind: kind, raw: raw }
 end function
 
 ' Normalises the subjects of a page and keeps the rows that belong to it. A row is

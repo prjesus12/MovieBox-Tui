@@ -417,10 +417,12 @@ sub MB_CacheWrite(key as String, data as Dynamic)
     ' tmp: is small and shared with the downloaded subtitles, so keep the cache
     ' bounded and skip payloads that would dominate it.
     text = FormatJson({ ts: MB_NowSeconds(), data: data })
-    if Len(text) > 400000 then return
+    if text = invalid or text = "" or Len(text) > 400000 then return
     fs = CreateObject("roFileSystem")
     if not fs.Exists("tmp:/cache") then fs.CreateDirectory("tmp:/cache")
-    entries = fs.ListDir("tmp:/cache")
+    ' roFileSystem has no ListDir: calling it killed the task with a runtime error,
+    ' which on a sideloaded channel halts every thread in the debugger.
+    entries = fs.GetDirectoryListing("tmp:/cache")
     if entries <> invalid and entries.Count() >= 60 then
         for each name in entries
             fs.Delete("tmp:/cache/" + name)
