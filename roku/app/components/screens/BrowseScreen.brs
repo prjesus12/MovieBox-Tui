@@ -154,6 +154,9 @@ sub buildRows()
     if row < root.getChildCount() and col >= root.getChild(row).getChildCount() then col = 0
     if row <> 0 or col <> 0 then m.rows.jumpToRowItem = [row, col]
     focusItem(row, col)
+    ' Seed the hero now instead of waiting for the debounced timer.
+    updateHeroText()
+    m.localDigest = localDigest()
     ' Only take focus if this screen still owns it; a pushed screen (details, player)
     ' must never lose focus to a page that finished loading in the background.
     if m.wantFocus = true and m.top.isInFocusChain() then m.rows.setFocus(true)
@@ -222,8 +225,9 @@ sub focusItem(row as Integer, col as Integer)
     r = content.getChild(row)
     if col < 0 or col >= r.getChildCount() then return
     m.focusedItem = r.getChild(col)
-    updateHeroText()
-    ' Debounce only the (expensive) backdrop image while scrolling fast.
+    ' The hero is measured (boundingRect) and repositioned: doing that on every
+    ' focus event forces a text layout per key press while scrolling. The timer
+    ' already existed for the backdrop, so the whole hero moves behind it.
     m.heroTimer.control = "stop"
     m.heroTimer.control = "start"
 end sub
@@ -259,6 +263,7 @@ end sub
 sub updateHero()
     item = m.focusedItem
     if item = invalid then return
+    updateHeroText()
     uri = item.backdrop
     if uri = invalid or uri = "" then uri = item.HDPosterUrl
     if m.backdrop.uri <> uri then
@@ -291,12 +296,38 @@ end sub
 
 sub onRefresh()
     if isLibrary() then
-        buildRows()
+        rebuildIfChanged()
     else if m.loaded and m.top.tabId = "1" then
-        buildRows()
+        rebuildIfChanged()
     else if m.failed then
         load()
     end if
+end sub
+
+' Rebuilding hands the RowList a brand new root and reparents every remote row,
+' which is the expensive part of coming back from a details screen. Fingerprint
+' the local data (and the preference that filters it) and skip when it matches.
+function localDigest() as String
+    parts = ["hindi=" + PrefGet("hideHindi", "on")]
+    for each entry in HistoryAll()
+        if entry <> invalid and entry.item <> invalid then
+            position = "0"
+            if entry.position <> invalid then position = entry.position.ToStr()
+            stamp = "0"
+            if entry.updated <> invalid then stamp = entry.updated.ToStr()
+            parts.Push(entry.item.id + ":" + position + ":" + stamp)
+        end if
+    end for
+    parts.Push("|")
+    for each item in FavoritesAll()
+        if item <> invalid then parts.Push(item.id)
+    end for
+    return parts.Join(",")
+end function
+
+sub rebuildIfChanged()
+    if m.rows.content <> invalid and localDigest() = m.localDigest then return
+    buildRows()
 end sub
 
 sub onVisibleChange()
