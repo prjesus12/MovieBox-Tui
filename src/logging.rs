@@ -78,6 +78,19 @@ pub fn sanitize_path(path: impl AsRef<std::path::Path>) -> String {
         .unwrap_or(raw)
 }
 
+/// `error` followed by every `source()` cause, joined with `: `. reqwest's own
+/// `Display` stops at "error sending request", which hides DNS/TLS/connect causes.
+pub fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 pub fn sanitize_url(raw: &str) -> String {
     match url::Url::parse(raw) {
         Ok(parsed) => {
@@ -116,6 +129,25 @@ pub fn sanitize_url(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_chain_appends_every_cause() {
+        #[derive(Debug)]
+        struct Outer(std::io::Error);
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("error sending request")
+            }
+        }
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        let error = Outer(std::io::Error::other("dns error"));
+        assert_eq!(error_chain(&error), "error sending request: dns error");
+        assert_eq!(error_chain(&std::io::Error::other("plain")), "plain");
+    }
 
     #[test]
     fn test_sanitize_url_valid() {

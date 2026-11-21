@@ -158,6 +158,9 @@ impl MobileClient {
             std::env::set_var("MOVIEBOX_DATA_DIR", &data_dir);
         }
 
+        #[cfg(target_os = "android")]
+        android_log::install();
+
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -620,5 +623,56 @@ mod tests {
         assert_eq!(back.subject_id, item.subject_id);
         assert_eq!(back.season, 2);
         assert_eq!(back.duration_seconds, Some(3600));
+    }
+}
+
+/// Routes `log` records to logcat (tag `moviebox-core`) so Android builds can be
+/// diagnosed with `adb logcat`. Uses the NDK's `liblog` directly: no extra crate.
+#[cfg(target_os = "android")]
+mod android_log {
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int};
+
+    #[link(name = "log")]
+    unsafe extern "C" {
+        fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+    }
+
+    struct Logcat;
+
+    impl log::Log for Logcat {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            metadata.level() <= log::Level::Info
+        }
+
+        fn log(&self, record: &log::Record) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let prio = match record.level() {
+                log::Level::Error => 6,
+                log::Level::Warn => 5,
+                log::Level::Info => 4,
+                log::Level::Debug => 3,
+                log::Level::Trace => 2,
+            };
+            let text = format!("{}", record.args()).replace('\0', " ");
+            if let (Ok(tag), Ok(text)) = (CString::new("moviebox-core"), CString::new(text)) {
+                // SAFETY: both pointers are valid NUL-terminated strings for the call.
+                unsafe {
+                    __android_log_write(prio, tag.as_ptr(), text.as_ptr());
+                }
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    static LOGGER: Logcat = Logcat;
+
+    pub fn install() {
+        if log::set_logger(&LOGGER).is_ok() {
+            log::set_max_level(log::LevelFilter::Info);
+        }
     }
 }

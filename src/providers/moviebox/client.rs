@@ -306,7 +306,8 @@ impl MovieBoxClient {
                 }
                 Err(error) => {
                     log::warn!(
-                        "moviebox host {idx} request failed: {error} [{}]",
+                        "moviebox host {idx} request failed: {} [{}]",
+                        crate::logging::error_chain(&error),
                         crate::logging::sanitize_url(&url)
                     );
                     self.active_base_idx

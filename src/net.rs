@@ -110,8 +110,14 @@ impl Resolve for FallbackResolver {
 }
 
 pub fn http_client_builder_base() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .dns_resolver(Arc::new(FallbackResolver::new()))
+    let builder = reqwest::Client::builder();
+    // Android has no /etc/resolv.conf, so hickory would fall back to raw UDP queries
+    // against public DNS, which carriers, VPNs and Private DNS can slow or block (and
+    // which eat the short connect timeouts). reqwest's default resolver goes through
+    // the platform's getaddrinfo, which honours all of that.
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.dns_resolver(Arc::new(FallbackResolver::new()));
+    builder
         .tcp_nodelay(true)
         .tcp_keepalive(Some(std::time::Duration::from_secs(45)))
         .pool_idle_timeout(Some(std::time::Duration::from_secs(90)))
