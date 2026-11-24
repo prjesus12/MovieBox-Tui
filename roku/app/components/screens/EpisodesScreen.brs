@@ -128,6 +128,10 @@ end sub
 ' field and never reaches the play action here.
 sub startAutoPlay()
     if m.autoPlayDone then return
+    ' `autoPlay` is added at runtime by MainScene and only for a Direct to Play
+    ' launch, so an ordinary visit must skip this instead of reading a field that
+    ' does not exist. `startEpisode` is declared in the XML with a default.
+    if not m.top.hasField("autoPlay") then return
     if m.top.getField("autoPlay") <> true then return
     if m.grid.content = invalid or m.grid.content.getChildCount() = 0 then return
     m.autoPlayDone = true

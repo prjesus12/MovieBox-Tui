@@ -259,10 +259,12 @@ pub enum DropReason {
     DuplicateId,
     /// The live API could not return details for the entry (live mode only).
     DetailsUnavailable,
+    /// The requested `quality` is not one of Roku's accepted values.
+    InvalidQuality,
 }
 
 impl DropReason {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::MissingId,
         Self::MissingTitle,
         Self::MissingPoster,
@@ -270,6 +272,7 @@ impl DropReason {
         Self::IdTooLong,
         Self::DuplicateId,
         Self::DetailsUnavailable,
+        Self::InvalidQuality,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -281,6 +284,7 @@ impl DropReason {
             Self::IdTooLong => "id too long",
             Self::DuplicateId => "duplicate id",
             Self::DetailsUnavailable => "details unavailable",
+            Self::InvalidQuality => "invalid quality",
         }
     }
 }
@@ -582,7 +586,11 @@ pub fn asset_from(item: &DumpItem, language: &str, quality: &str) -> Result<Asse
         .filter(|description| !description.is_empty())
         .map(|description| truncate_chars(description, MAX_TEXT_CHARS))
         .unwrap_or_else(|| title.clone());
-    let quality = normalize_quality(quality).unwrap_or(DEFAULT_QUALITY);
+    // Never silently publish a different quality claim than the caller asked for.
+    let quality = match normalize_quality(quality) {
+        Ok(value) => value,
+        Err(_) => return Err(DropReason::InvalidQuality),
+    };
 
     Ok(Asset {
         id: item.id.clone(),
@@ -617,12 +625,7 @@ pub fn asset_from(item: &DumpItem, language: &str, quality: &str) -> Result<Asse
 ///
 /// The first entry to claim an id is emitted; later entries with that id are
 /// dropped as duplicates so the feed keeps unique, stable ids.
-pub fn build_feed(
-    items: Vec<DumpItem>,
-    language: &str,
-    _countries: &[String],
-    quality: &str,
-) -> (Vec<Asset>, Report) {
+pub fn build_feed(items: Vec<DumpItem>, language: &str, quality: &str) -> (Vec<Asset>, Report) {
     let mut report = Report::default();
     let mut assets = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -666,7 +669,7 @@ pub struct RunResult {
 
 /// Build and serialize a feed from catalogue entries; no I/O.
 pub fn run(items: Vec<DumpItem>, config: &Config) -> Result<RunResult, String> {
-    let (assets, report) = build_feed(items, &config.language, &config.countries, &config.quality);
+    let (assets, report) = build_feed(items, &config.language, &config.quality);
     let feed = feed_from(assets, &config.language, &config.countries);
     let json = serde_json::to_string_pretty(&feed)
         .map_err(|error| format!("cannot serialize the Roku Search feed: {error}"))?;

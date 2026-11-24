@@ -124,9 +124,11 @@ sub onDetails(event as Object)
     m.spinner.running = false
     if res.ok <> true then
         ' A deep link that points at an id the catalogue does not know must land on
-        ' Home, not on this error screen with its retry button.
-        if not m.directPlayUsed and directPlayMode() <> "" then
-            m.directPlayUsed = true
+        ' Home, not on this error screen with its retry button. A transient failure
+        ' (timeout, dead host, busy server) keeps the retry screen: the link was fine.
+        direct = directPlayMode() <> "" and not m.directPlayUsed
+        if direct then m.directPlayUsed = true
+        if direct and LooksUnknownId(res.error) then
             m.top.action = { type: "home", message: res.error }
             return
         end if
@@ -174,6 +176,13 @@ function directPlayMode() as String
     value = m.top.getField("directPlay")
     if value = invalid then return ""
     return LCase(value)
+end function
+
+' The catalogue answers 404 for an id it does not have; a timeout or a dead host
+' must never be mistaken for an unknown title and drop the viewer on Home.
+function LooksUnknownId(error as String) as Boolean
+    text = LCase(error)
+    return Instr(1, text, "404") > 0 or Instr(1, text, "not found") > 0
 end function
 
 ' Start playback as soon as the metadata arrives. The catalogue's own type picks

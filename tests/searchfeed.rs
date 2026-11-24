@@ -322,7 +322,7 @@ fn searchfeed_each_drop_reason_is_counted() {
         good, no_title, no_poster, no_year, long_id, empty_id, first_dup, second_dup,
     ];
 
-    let (assets, report) = searchfeed::build_feed(items, "en", &["us".to_string()], "hd");
+    let (assets, report) = searchfeed::build_feed(items, "en", "hd");
 
     assert_eq!(
         assets.len(),
@@ -352,7 +352,7 @@ fn searchfeed_each_drop_reason_is_counted() {
 fn searchfeed_zero_assets_exit_one_and_one_asset_exits_zero() {
     let config = config(&[]);
 
-    let (empty_assets, empty_report) = searchfeed::build_feed(Vec::new(), "en", &[], "hd");
+    let (empty_assets, empty_report) = searchfeed::build_feed(Vec::new(), "en", "hd");
     assert!(empty_assets.is_empty());
     assert_eq!(empty_report.emitted, 0);
 

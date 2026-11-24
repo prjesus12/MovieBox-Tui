@@ -53,8 +53,15 @@ async fn run(argv: &[String]) -> Result<i32, String> {
     }
 
     match config.output.as_deref() {
-        Some(path) => std::fs::write(path, format!("{}\n", result.json))
-            .map_err(|error| format!("cannot write {}: {error}", path.display()))?,
+        Some(path) => {
+            // A half-written file would replace a feed Roku is already serving, so
+            // the new feed lands beside the old one and is renamed into place.
+            let staging = format!("{}.tmp", path.display());
+            std::fs::write(&staging, format!("{}\n", result.json))
+                .map_err(|error| format!("cannot write {staging}: {error}"))?;
+            std::fs::rename(&staging, path)
+                .map_err(|error| format!("cannot replace {}: {error}", path.display()))?;
+        }
         None => println!("{}", result.json),
     }
     eprintln!("search-feed: {}", result.report);

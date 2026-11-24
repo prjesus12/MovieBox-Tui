@@ -106,7 +106,20 @@ verified only: no device, no scene-graph harness.
 
 L8 (decision, worker-raised): the direct-play field on `DetailsScreen` and the
 `autoPlay` field on `EpisodesScreen` are added at runtime with `addFields`, because
-both `.xml` files were outside that worker's edit surface. Reads are guarded with
-`hasField`, so a missing field degrades to "no direct playback", never to a crash.
-A stale-`contentId` notice reuses `MainScene`'s existing dialog rather than adding a
-toast surface.
+both `.xml` files were outside that worker's edit surface. A stale-`contentId`
+notice reuses `MainScene`'s existing dialog rather than adding a toast surface.
+Correction (review 4): this line first claimed every such read was guarded with
+`hasField`. Only `DetailsScreen.directPlayMode` was; `EpisodesScreen.startAutoPlay`
+called `getField("autoPlay")` unguarded, which is the bug R4-001 below records.
+
+L9 (review 4, lineage `review-5d1e0609366e42a3`, tier high, budget 200): one
+critical finding, accepted. R4-001 — `EpisodesScreen.startAutoPlay` called
+`getField("autoPlay")` on a node that has no such field on an ordinary visit, so
+every normal series episode screen would have failed at runtime; the read is now
+guarded with `hasField` and L8 is corrected. Three non-blocking findings were also
+fixed in the same bounded correction: the direct-play failure branch now sends the
+viewer Home only for a genuine unknown id (404 / "not found") and keeps the retry
+screen for a transient failure; `asset_from` rejects an invalid `quality` with a
+recorded drop instead of silently publishing `hd`; `build_feed` no longer takes a
+`countries` argument it ignored; and the binary writes the feed to a staging file
+and renames it into place, so a failure cannot truncate the feed already hosted.
