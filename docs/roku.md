@@ -58,10 +58,57 @@ section, which is what the player and the catalogue already read:
 
 ## Deep links
 
-The channel accepts `contentId` and `mediaType` launch parameters (Roku Search,
-voice search, or a `roInput` event while running). `mediaType` containing
-`series`, `season` or `episode` opens the title as a series; anything else opens
-as a movie. There is no Roku Search feed published yet.
+The channel accepts `contentid` and `mediatype` launch parameters in either
+casing — Roku sends them lowercase, a typed link may send camelCase — from Roku
+Search, voice search, or a `roInput` event while running.
+
+| `mediatype` | Result |
+| :--- | :--- |
+| `movie` | Plays that movie directly, at its saved bookmark |
+| `series` | Opens the series and starts its bookmarked episode; season 1 episode 1 when there is no bookmark |
+| anything else, or missing | Opens the details screen |
+| a `contentid` the catalogue does not know | Returns to Home with a notice |
+
+Direct to Play means no screen stands between the Roku Search selection and the
+video (certification items 5.1 and 5.2).
+
+## Roku Search feed
+
+`search-feed` builds the JSON feed Roku's search crawler reads. It ships with the
+crate, next to `moviebox-tui`:
+
+```bash
+search-feed --language en --countries us,mx --output roku-search-feed.json
+```
+
+`--language` and `--countries` are required: the feed states which languages and
+markets it serves, so neither is guessed. `--quality` (`sd`, `hd`, `hd+`, `fhd`,
+`uhd`) is the quality claim published for every asset and defaults to `hd`.
+`--input <dump.json>` builds the same feed from a saved catalogue dump instead of
+fetching live; that is the path the tests use. Titles that cannot satisfy Roku's
+schema (no title, no poster, no year, id over 50 characters) are dropped and
+counted, and the command exits 1 instead of writing an empty feed over a good one.
+
+The feed carries movies and series. Every `playId` is the subject id the channel
+resolves from `contentid`, and every asset `type` is the `mediatype` the channel
+expects, so a feed entry cannot drift from the launch path; one test pins both
+directions. Genres are translated to Roku's closed enum through
+`roku/search-feed/genres.json` and advisory ratings through
+`roku/search-feed/ratings.json`, which also carry the allowed value lists the
+tests check against.
+
+Registering it is Roku's side and outside this repository:
+
+1. Host the JSON file at a public URL. Roku crawls it and supports one optional
+   HTTP basic-auth pair.
+2. Developer Dashboard → the app → Search feeds → new search feed. Only public,
+   published apps can be selected, so a sideloaded or Development channel cannot
+   participate; sideloading only helps to test the deep links.
+3. Supply the provider logo (143×113 PNG), the teaser logo (165×60 PNG) and a
+   deep-link sample per media type, then submit. Roku validates the feed,
+   completes deep-link certification and only then publishes it.
+4. Limits: at most 20 submissions per week, up to 24 hours of propagation, and a
+   feed is not reprocessed unless it is resubmitted.
 
 ## Caching
 
@@ -85,7 +132,8 @@ budgeted at 25 s instead of 7 hosts × 12 s.
 ## Known limitations
 
 - No DRM: protected titles are not playable.
-- No Roku Search feed, so the platform's global search does not list the channel.
+- The Search feed is built by this repository but is not registered with Roku
+  yet, so the platform's global search does not list the channel until it is.
 - Screen reader coverage is partial: browse tiles, search results and episodes set
   `AUDIO_GUIDE_TEXT` so the focused item is spoken. The player overlay, toasts and
   the custom keyboard keys are still silent.

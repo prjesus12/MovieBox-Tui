@@ -150,6 +150,9 @@ sub onScreenAction(event as Object)
         screen.seasons = action.seasons
         screen.startSeason = action.se
         screen.startEpisode = action.ep
+        ' Direct to Play: Roku Search already chose the episode, so the grid starts
+        ' it instead of waiting for a tap. An ordinary visit leaves the field off.
+        if action.directPlay = true then screen.addFields({ autoPlay: true })
         screen.ready = true
         pushScreen(screen)
     else if t = "play" then
@@ -165,17 +168,43 @@ sub onScreenAction(event as Object)
         screen.start = true
     else if t = "close" then
         popScreen()
+    else if t = "home" then
+        goHomeWithNotice(action.message)
     else if t = "itemOptions" then
         openItemOptions(action.item, action.library = true)
     end if
 end sub
 
-sub openDetails(item as Object)
+sub openDetails(item as Object, directPlay = "" as String)
     if item = invalid then return
     screen = CreateObject("roSGNode", "DetailsScreen")
     ' Details may switch audio versions in place, so never mutate the row's node.
     screen.item = item.clone(false)
+    ' Direct to Play needs the title's metadata before the player can start, so the
+    ' deep link rides the ordinary details request and hands the screen a field
+    ' that makes it start playback as soon as the payload lands. Only a Roku
+    ' Search deep link adds it; every other visit behaves exactly as before.
+    if directPlay <> "" then screen.addFields({ directPlay: directPlay })
     pushScreen(screen)
+end sub
+
+' A Roku Search deep link that the catalogue cannot resolve must land on Home
+' instead of on an error screen. Unwinding the stack is what this scene already
+' does to return home; the message uses the dialog it already shows for messages.
+sub goHomeWithNotice(message as Dynamic)
+    while m.stack.Count() > 0
+        popScreen()
+    end while
+    showSection(0, false)
+    text = message
+    if text = invalid or text = "" then text = "That title is not available right now."
+    m.exitDialog.tag = "notice"
+    m.exitDialog.title = "Not available"
+    m.exitDialog.message = text
+    m.exitDialog.currentIndex = -1
+    m.exitDialog.options = ["OK"]
+    m.exitDialog.visible = true
+    m.exitDialog.setFocus(true)
 end sub
 
 ' Options (*) on a tile: quick add/remove from My List or Continue Watching.
@@ -237,6 +266,10 @@ end sub
 sub onExitSelected()
     tag = m.exitDialog.tag
     index = m.exitDialog.selected
+    if tag = "notice" then
+        hideDialog()
+        return
+    end if
     if tag = "exit" then
         if index = 0 then
             m.top.exitApp = true
@@ -281,7 +314,13 @@ sub onLaunchArgs()
     while m.stack.Count() > 0
         popScreen()
     end while
-    openDetails(node)
+    ' Direct to Play (Roku certification 5.1/5.2): `movie` and `series` must put
+    ' the video on screen with no choice screen in between. Every other mediaType
+    ' Roku sends (episode, season, shortFormVideo, tvSpecial, livefeed, sportsevent)
+    ' and a missing one keep today's details-screen behaviour.
+    directPlay = ""
+    if mediaType = "movie" or mediaType = "series" then directPlay = mediaType
+    openDetails(node, directPlay)
 end sub
 
 ' ---------------------------------------------------------------------------

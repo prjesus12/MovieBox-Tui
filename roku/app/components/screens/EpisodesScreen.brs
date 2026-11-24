@@ -10,6 +10,7 @@ sub init()
     m.grid.observeField("itemSelected", "onEpisodeSelected")
     m.currentSeasonIndex = -1
     m.pendingEpisode = 0
+    m.autoPlayDone = false
 end sub
 
 sub onReady()
@@ -35,6 +36,7 @@ sub onReady()
     m.pendingEpisode = m.top.startEpisode
     m.seasonList.jumpToItem = startIndex
     showSeason(startIndex)
+    startAutoPlay()
 end sub
 
 sub onSeasonFocused()
@@ -95,7 +97,15 @@ sub buildGrid(season as Object)
 end sub
 
 sub onEpisodeSelected()
-    child = m.grid.content.getChild(m.grid.itemSelected)
+    playEpisode(m.grid.itemSelected)
+end sub
+
+' One play action for both the tap and the Direct to Play hand-off, so the
+' resume point keeps coming from the episode tile and nowhere else.
+sub playEpisode(index as Integer)
+    if index < 0 then return
+    if m.grid.content = invalid then return
+    child = m.grid.content.getChild(index)
     if child = invalid then return
     m.top.action = { type: "play", item: m.top.item, se: child.se, ep: child.ep, resume: child.resumeAt, seasons: m.top.seasons }
 end sub
@@ -106,6 +116,23 @@ sub onFocusIn()
     else
         m.seasonList.setFocus(true)
     end if
+    startAutoPlay()
+end sub
+
+' Direct to Play (Roku Search `series`): MainScene adds this field only when the
+' deep link already chose the episode, so the grid starts it instead of waiting
+' for a tap. The grid has to exist before there is a resume point to read and the
+' screen has to be in the stack before its action is observed, so both callbacks
+' try; whichever lands second starts it, exactly once, and clears the field so a
+' return from the player does not replay the deep link. An ordinary visit has no
+' field and never reaches the play action here.
+sub startAutoPlay()
+    if m.autoPlayDone then return
+    if m.top.getField("autoPlay") <> true then return
+    if m.grid.content = invalid or m.grid.content.getChildCount() = 0 then return
+    m.autoPlayDone = true
+    m.top.setField("autoPlay", false)
+    playEpisode(m.top.startEpisode - 1)
 end sub
 
 sub onRefresh()
