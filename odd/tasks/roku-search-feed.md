@@ -123,3 +123,19 @@ screen for a transient failure; `asset_from` rejects an invalid `quality` with a
 recorded drop instead of silently publishing `hd`; `build_feed` no longer takes a
 `countries` argument it ignored; and the binary writes the feed to a staging file
 and renames it into place, so a failure cannot truncate the feed already hosted.
+
+L10 (review 4 outcome): lineage `review-5d1e0609366e42a3` approved at tier high and
+its authority burned (`gentle-ai.review-acknowledged/v1`). Ten advisory findings
+stand open as separate later work, none blocking: the S4 test pins the mapping with
+its own helper instead of reading `MainScene` (R2-001/R3-003); ISO codes are only
+shape-checked, so `zz` passes (R3-002); the binary's exit codes and staging rename
+are untested (R3-004); `is_in_progress`-style edge cases in details retry (R3-001/
+R4-002) are now handled by the 404-only Home branch but still heuristic; and
+`AssetType::channel_stype` is unused in production (R2-001). Delivery stays under
+ordinary policy: nothing was pushed.
+
+L11 (slice boundary): two commits plus this log — `3568d4a` the feed generator,
+`8238d46` the channel deep-link work, `49d4a3a` the review correction — 2212
+authored lines across Rust, BrightScript, data files and docs. It exceeds the
+~400-line guidance, so it is a single feature slice and the next feature starts on
+its own branch point rather than inside this one.
