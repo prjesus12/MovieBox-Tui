@@ -95,9 +95,12 @@ end sub
 
 sub onTaskEnded()
     if m.task = invalid then return
-    if m.task.response <> invalid then return
+    ' An assocarray field is never invalid, it starts as an empty AA; only a
+    ' response that carries `ok` was actually published.
+    res = m.task.response
+    if Type(res) = "roAssociativeArray" and res.ok <> invalid then return
+    cancelTask()
     m.spinner.running = false
-    m.task = invalid
     m.failed = true
     showEmpty("Couldn't load this page", "The channel could not read this list." + chr(10) + "Press OK to try again.")
 end sub
@@ -115,6 +118,7 @@ sub onResponse()
     ' A cancelled load must never be able to publish its rows.
     if m.task = invalid then return
     res = m.task.response
+    if Type(res) <> "roAssociativeArray" then res = {}
     content = m.task.content
     stopTimer(m.loadTimer)
     stopTimer(m.crashTimer)
@@ -132,7 +136,12 @@ sub onResponse()
         buildRows()
     else
         m.failed = true
-        showEmpty("Couldn't load this page", res.error + chr(10) + "Press OK to try again.")
+        ' A render-thread type error halts the whole channel, so never concatenate
+        ' a field the task may have left unset.
+        reason = "MovieBox returned an unexpected answer"
+        errorType = Type(res.error)
+        if errorType = "roString" or errorType = "String" then reason = res.error
+        showEmpty("Couldn't load this page", reason + chr(10) + "Press OK to try again.")
     end if
 end sub
 

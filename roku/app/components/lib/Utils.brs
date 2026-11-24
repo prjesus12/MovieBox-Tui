@@ -255,6 +255,9 @@ end function
 ' Hiding Hindi releases is the shipped default but it is a preference now:
 ' the Settings screen turns it off for anyone who wants the whole catalogue.
 function HideHindiActive() as Boolean
+    ' Task threads memoise the preference for one request; the render thread
+    ' never sets the memo, so it always reads the current value.
+    if m.hideHindiMemo <> invalid then return m.hideHindiMemo
     return PrefGet("hideHindi", "on") <> "off"
 end function
 

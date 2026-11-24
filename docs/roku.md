@@ -67,7 +67,9 @@ as a movie. There is no Roku Search feed published yet.
 
 Catalogue responses are cached on `tmp:/cache` and reused until their TTL
 expires: homepage 30 minutes, search 10 minutes, details and season lists 24
-hours. Signed `play-info` responses are never cached because the CDN URLs they
+hours. Catalogue tabs are cached as compact rows (only the subject fields the
+channel reads), not as the raw 200-600 KB page, so every tab, Home included,
+fits under the size limit and a tab switch skips the download and the big parse. Signed `play-info` responses are never cached because the CDN URLs they
 return expire. Payloads above 400 KB are skipped, and the cache is emptied once
 it holds 60 files, because `tmp:` is small and shared with downloaded subtitles.
 
