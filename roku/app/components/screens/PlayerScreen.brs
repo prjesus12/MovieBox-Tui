@@ -102,7 +102,10 @@ sub onDeadline()
 end sub
 
 sub onStreams(event as Object)
-    res = event.getRoSGNode().response
+    ' A response that is no longer the current task must not clear the live one.
+    node = event.getRoSGNode()
+    res = node.response
+    if node <> m.task then return
     DeadlineStop(m.deadline)
     m.task = invalid
     if m.closing then return

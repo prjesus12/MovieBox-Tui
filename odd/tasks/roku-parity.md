@@ -188,3 +188,11 @@ now runs first. R3-003/R4-002 — `onDetails` read `m.task.response` after
 R2-003 (deadline handler rebinding), R4-003 (prune subtitles only after a
 successful download) and R4-004 (per-attempt share of the host-walk budget) are
 fixed in the same bounded correction.
+
+L19 (review, same lineage, targeted validation): the validator confirmed R3-001,
+R3-002, R3-003 and R4-001 fixed and rejected R4-002 as only partly met — a queued
+response from a cancelled task could still clear a *newly* active task and stop
+its deadline, because the handler did not compare the event node with `m.task`.
+The lineage is therefore `escalated` and terminal: one bounded correction per
+transaction, so the residual is fixed in a follow-up commit and verified by a
+fresh transaction instead of another correction of the same authority.

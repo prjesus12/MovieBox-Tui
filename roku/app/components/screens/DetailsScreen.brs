@@ -109,9 +109,11 @@ sub onDeadline()
 end sub
 
 sub onDetails(event as Object)
-    ' Read the payload from the event's own node: a queued response can still be
-    ' delivered after cancelTask cleared m.task.
-    res = event.getRoSGNode().response
+    ' Read the payload from the event's own node, and ignore a response that is no
+    ' longer the current task: it must not clear the live task or stop its deadline.
+    node = event.getRoSGNode()
+    res = node.response
+    if node <> m.task then return
     DeadlineStop(m.deadline)
     m.task = invalid
     m.spinner.running = false
