@@ -76,6 +76,9 @@ sub layoutInfo()
 end sub
 
 sub loadDetails(id as String)
+    ' Re-entering details (dub switch, retry, another title) must not leave the
+    ' previous request running and observed.
+    cancelTask()
     clearButtons()
     m.status.text = ""
     m.spinner.running = true
@@ -83,10 +86,31 @@ sub loadDetails(id as String)
     m.task.observeField("response", "onDetails")
     m.task.request = { action: "details", id: id }
     m.task.control = "run"
+    m.deadline = DeadlineStart(m.top, m.deadline, 25, "onDeadline")
+end sub
+
+sub cancelTask()
+    DeadlineStop(m.deadline)
+    if m.task = invalid then return
+    m.task.unobserveField("response")
+    m.task.control = "stop"
+    m.task = invalid
+end sub
+
+' The detail payload never arrived: swap the spinner for the existing retry
+' button so the viewer can act instead of guessing whether it is still loading.
+sub onDeadline()
+    if m.task = invalid then return
+    cancelTask()
+    m.spinner.running = false
+    m.status.text = "This title took too long to load. Check the connection and press OK to try again."
+    m.retry = true
+    buildButtons()
 end sub
 
 sub onDetails()
     res = m.task.response
+    DeadlineStop(m.deadline)
     m.task = invalid
     m.spinner.running = false
     if res.ok <> true then

@@ -73,15 +73,37 @@ sub fetchStreams()
     m.started = false
     m.video.control = "stop"
     showLoading("Finding the best stream and subtitles...")
+    ' Autoplay and "other sources" re-enter here; the previous lookup must not stay
+    ' alive to answer after this one.
+    cancelTask()
     m.task = CreateObject("roSGNode", "ApiTask")
     m.task.observeField("response", "onStreams")
     item = m.top.item
     m.task.request = { action: "streams", id: item.sid, se: m.se, ep: m.ep, title: item.title, year: item.year, stype: item.stype }
     m.task.control = "run"
+    m.deadline = DeadlineStart(m.top, m.deadline, 35, "onDeadline")
+end sub
+
+sub cancelTask()
+    DeadlineStop(m.deadline)
+    if m.task = invalid then return
+    m.task.unobserveField("response")
+    m.task.control = "stop"
+    m.task = invalid
+end sub
+
+' No stream inside the deadline: stop waiting and take the normal fallback path
+' instead of leaving the spinner up for as long as the remote is held.
+sub onDeadline()
+    if m.task = invalid then return
+    cancelTask()
+    hideLoading()
+    autoAlternatives("MovieBox is taking too long to answer.")
 end sub
 
 sub onStreams(event as Object)
     res = event.getRoSGNode().response
+    DeadlineStop(m.deadline)
     m.task = invalid
     if m.closing then return
     if res.ok <> true then
@@ -300,7 +322,9 @@ sub openOptions()
     options = []
     m.optionIds = []
     if m.sources.Count() > 0 then
-        options.Push("Quality:  " + m.sources[m.sourceIndex].label)
+        quality = ""
+        if m.sourceIndex >= 0 and m.sourceIndex < m.sources.Count() then quality = m.sources[m.sourceIndex].label
+        options.Push("Quality:  " + quality)
         m.optionIds.Push("quality")
         options.Push("Subtitles:  " + subName)
         m.optionIds.Push("subtitles")
@@ -412,7 +436,7 @@ sub onDialogSelected()
             showToast("Audio: " + audioTrackName(tracks[index]))
         end if
     else if tag = "quality" then
-        if index <> m.sourceIndex then
+        if index >= 0 and index < m.sources.Count() and index <> m.sourceIndex then
             PrefSet("maxRes", m.sources[index].resolution.ToStr())
             position = Int(m.video.position)
             playSource(index, position)

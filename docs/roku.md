@@ -68,8 +68,19 @@ as a movie. There is no Roku Search feed published yet.
 Catalogue responses are cached on `tmp:/cache` and reused until their TTL
 expires: homepage 30 minutes, search 10 minutes, details and season lists 24
 hours. Signed `play-info` responses are never cached because the CDN URLs they
-return expire. Payloads above 400 KB are skipped, and the cache is emptied once
-it holds 60 files, because `tmp:` is small and shared with downloaded subtitles.
+return expire. Payloads above 400 KB are skipped, and the cache is capped at 60
+files: the oldest entries are pruned first (an index next to the files records
+when each one was written), because `tmp:` is small and shared with downloaded
+subtitles. `tmp:/subs` keeps at most 40 subtitle files under the same rule, so a
+long binge does not fill the partition.
+
+## Deadlines
+
+Every network path has a deadline so a dead connection cannot leave the viewer
+on a spinner: details 25 s, search 20 s, stream lookup 35 s, addon check 20 s.
+Details and streams then offer their retry or other-provider path, search clears
+its spinner with a hint, and the signed-host fallback walk inside one request is
+budgeted at 25 s instead of 7 hosts × 12 s.
 
 ## Known limitations
 

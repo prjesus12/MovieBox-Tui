@@ -278,7 +278,12 @@ function MB_RequestHosts(method as String, pathAndQuery as String, body as Dynam
     if start < 0 or start >= hosts.Count() then start = 0
 
     lastCode = 0
+    ' Seven hosts at 12 s each is a minute and a half behind a single spinner. The
+    ' walk gets a wall-clock budget so a dead network fails while the viewer is
+    ' still looking at the screen.
+    deadline = MB_NowSeconds() + 25
     for i = 0 to hosts.Count() - 1
+        if i > 0 and MB_NowSeconds() >= deadline then exit for
         idx = (start + i) mod hosts.Count()
         headers = MB_SignedHeaders(method, pathAndQuery, body, token)
         res = MB_HttpRequest(method, hosts[idx] + pathAndQuery, body, headers, 12000)
@@ -395,8 +400,23 @@ function MB_CacheKey(text as String) as String
             out = out + "-"
         end if
     end for
-    if Len(out) > 90 then out = Right(out, 90)
-    return out
+    if Len(out) > 48 then out = Left(out, 48)
+    ' Truncation alone let two long queries share one entry, so the whole request
+    ' is folded into a short digest and appended to the readable prefix.
+    return out + "-" + CacheDigest(text)
+end function
+
+' Two rolling sums with small moduli: no integer overflow, no dependency on
+' roEVPDigest inside the task thread, and long queries stop colliding.
+function CacheDigest(text as String) as String
+    a = 7
+    b = 13
+    for i = 1 to Len(text)
+        code = Asc(Mid(text, i, 1))
+        a = (a * 131 + code) mod 65521
+        b = (b * 4099 + code) mod 65519
+    end for
+    return a.ToStr() + "-" + b.ToStr()
 end function
 
 function MB_CacheRead(key as String, ttlSeconds as Integer) as Dynamic
@@ -420,13 +440,14 @@ sub MB_CacheWrite(key as String, data as Dynamic)
     if Len(text) > 400000 then return
     fs = CreateObject("roFileSystem")
     if not fs.Exists("tmp:/cache") then fs.CreateDirectory("tmp:/cache")
-    entries = fs.ListDir("tmp:/cache")
-    if entries <> invalid and entries.Count() >= 60 then
-        for each name in entries
-            fs.Delete("tmp:/cache/" + name)
-        end for
-    end if
-    WriteAsciiFile("tmp:/cache/" + key + ".json", text)
+    index = DirIndexRead("tmp:/cache")
+    ' Evict the oldest entries only. Emptying the directory also threw away the
+    ' page the viewer is looking at and every other warm entry.
+    DirPrune("tmp:/cache", 59, index)
+    name = key + ".json"
+    WriteAsciiFile("tmp:/cache/" + name, text)
+    index[name] = MB_NowSeconds()
+    DirIndexWrite("tmp:/cache", index)
 end sub
 
 function MB_GetCached(pathAndQuery as String, ttlSeconds as Integer) as Object

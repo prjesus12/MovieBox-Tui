@@ -276,7 +276,9 @@ sub onItemSelected()
     s = m.rows.rowItemSelected
     content = m.rows.content
     if s = invalid or content = invalid then return
-    item = content.getChild(s[0]).getChild(s[1])
+    item = invalid
+    row = content.getChild(s[0])
+    if row <> invalid then item = row.getChild(s[1])
     if item <> invalid then m.top.action = { type: "details", item: item }
 end sub
 

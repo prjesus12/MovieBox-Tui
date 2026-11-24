@@ -246,6 +246,8 @@ sub onExitSelected()
         return
     end if
     m.exitDialog.visible = false
+    ' A stale dialog index must not index past the actions built for the item.
+    if index < 0 or index >= m.optionActions.Count() then return
     actionName = m.optionActions[index]
     item = m.optionsItem
     if actionName = "details" then
