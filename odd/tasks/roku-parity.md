@@ -206,3 +206,15 @@ with a matching token without checking the event node; it now requires the node 
 be the live task, like the other screens. Non-blocking R3-002 (a queued deadline
 fire could cancel a freshly started task) is fixed with a `deadlineTask` identity
 check in all four screens.
+
+L21 (review 3 outcome): lineage `review-1978600f580a4449` approved at tier high and
+its authority burned (`gentle-ai.review-acknowledged/v1`). One advisory,
+non-blocking finding (R3-002) about a reused deadline timer cancelling a fresh
+task; the candidate already carries the `deadlineTask` identity check, so it is
+recorded as informational. Delivery stays under ordinary policy: nothing was
+pushed.
+
+L22 (slice boundary): the robustness slice is four commits on `feat/roku-hardening`
+— `392f17f` waits and pruning, `ed1a767` review 1 findings, `cffe95b` the R4-002
+residual, `3c61926` review 2 findings — 465 authored lines, past the ~400-line
+guidance, so it is a single review slice and not a chained one.
