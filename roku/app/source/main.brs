@@ -7,9 +7,8 @@ sub Main(args as Dynamic)
     scene = screen.CreateScene("MainScene")
     screen.Show()
 
-    if args <> invalid and args.contentId <> invalid then
-        scene.launchArgs = { contentId: args.contentId, mediaType: args.mediaType }
-    end if
+    launch = LaunchArgs(args)
+    if launch <> invalid then scene.launchArgs = launch
 
     scene.ObserveField("exitApp", port)
     input = CreateObject("roInput")
@@ -26,10 +25,27 @@ sub Main(args as Dynamic)
                 return
             end if
         else if msgType = "roInputEvent" then
-            info = msg.GetInfo()
-            if info <> invalid and info.contentId <> invalid then
-                scene.launchArgs = { contentId: info.contentId, mediaType: info.mediaType }
-            end if
+            launch = LaunchArgs(msg.GetInfo())
+            if launch <> invalid then scene.launchArgs = launch
         end if
     end while
 end sub
+
+' Roku Search and voice send deep-link args with lowercase keys (`contentid`,
+' `mediatype`), while manual launches use camelCase. Match keys case-insensitively
+' so either spelling is read, and return invalid when there is no id to act on.
+' Both the args at start-up and a roInput event while running go through here.
+function LaunchArgs(raw as Dynamic) as Dynamic
+    if raw = invalid then return invalid
+    contentId = ""
+    mediaType = ""
+    for each key in raw
+        value = ""
+        if Type(raw[key]) = "String" then value = raw[key]
+        name = LCase(key)
+        if name = "contentid" then contentId = value
+        if name = "mediatype" then mediaType = value
+    end for
+    if contentId = "" then return invalid
+    return { contentId: contentId, mediaType: mediaType }
+end function

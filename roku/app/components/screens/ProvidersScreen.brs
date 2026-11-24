@@ -53,6 +53,7 @@ sub addRow(content as Object, row as Object, text as String)
 end sub
 
 sub onRowSelected()
+    if m.list.itemSelected < 0 or m.list.itemSelected >= m.rows.Count() then return
     row = m.rows[m.list.itemSelected]
     m.selectedRow = row
     if row.kind = "builtin" then
@@ -152,14 +153,38 @@ end sub
 sub checkAddon(url as String)
     setStatus("Checking the addon...")
     m.lastUrl = url
+    cancelTask()
     m.task = CreateObject("roSGNode", "ApiTask")
     m.task.observeField("response", "onManifest")
     m.task.request = { action: "addonmanifest", url: url }
     m.task.control = "run"
+    m.deadlineTask = m.task
+    m.deadline = DeadlineStart(m.top, m.deadline, 20, "onDeadline")
+end sub
+
+sub cancelTask()
+    DeadlineStop(m.deadline)
+    if m.task = invalid then return
+    m.task.unobserveField("response")
+    m.task.control = "stop"
+    m.task = invalid
+end sub
+
+' An addon that never answers used to leave "Checking the addon..." on screen
+' forever with the keyboard closed.
+sub onDeadline()
+    ' Only the deadline armed for the task that is still in flight may fire.
+    if m.task = invalid or m.deadlineTask <> m.task then return
+    cancelTask()
+    setStatus("The addon did not answer. Check the URL and try again.")
 end sub
 
 sub onManifest(event as Object)
-    res = event.getRoSGNode().response
+    ' A response that is no longer the current task must not clear the live one.
+    node = event.getRoSGNode()
+    res = node.response
+    if node <> m.task then return
+    DeadlineStop(m.deadline)
     m.task = invalid
     if res.ok = true then
         if AddonsAdd(res.addon) then

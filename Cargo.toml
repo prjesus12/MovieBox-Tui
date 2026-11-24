@@ -77,6 +77,10 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 required-features = ["mobile"]
 
+[[bin]]
+name = "search-feed"
+path = "src/bin/search-feed.rs"
+
 [lib]
 name = "moviebox_tui"
 path = "src/lib.rs"

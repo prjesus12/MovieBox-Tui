@@ -12,6 +12,7 @@ pub mod net;
 pub mod player;
 pub mod providers;
 pub mod proxy;
+pub mod searchfeed;
 pub mod service;
 pub mod text_util;
 pub mod tui;

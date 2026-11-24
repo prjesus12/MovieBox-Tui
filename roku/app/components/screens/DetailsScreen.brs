@@ -21,6 +21,9 @@ sub init()
     m.details = invalid
     m.buttons = []
     m.focusIndex = 0
+    ' Direct to Play fires once per visit; a later details reload (audio switch)
+    ' must not start the player again.
+    m.directPlayUsed = false
 end sub
 
 sub onItemChange()
@@ -76,6 +79,9 @@ sub layoutInfo()
 end sub
 
 sub loadDetails(id as String)
+    ' Re-entering details (dub switch, retry, another title) must not leave the
+    ' previous request running and observed.
+    cancelTask()
     clearButtons()
     m.status.text = ""
     m.spinner.running = true
@@ -83,13 +89,49 @@ sub loadDetails(id as String)
     m.task.observeField("response", "onDetails")
     m.task.request = { action: "details", id: id }
     m.task.control = "run"
+    m.deadlineTask = m.task
+    m.deadline = DeadlineStart(m.top, m.deadline, 25, "onDeadline")
 end sub
 
-sub onDetails()
-    res = m.task.response
+sub cancelTask()
+    DeadlineStop(m.deadline)
+    if m.task = invalid then return
+    m.task.unobserveField("response")
+    m.task.control = "stop"
+    m.task = invalid
+end sub
+
+' The detail payload never arrived: swap the spinner for the existing retry
+' button so the viewer can act instead of guessing whether it is still loading.
+sub onDeadline()
+    ' Only the deadline armed for the task that is still in flight may fire.
+    if m.task = invalid or m.deadlineTask <> m.task then return
+    cancelTask()
+    m.spinner.running = false
+    m.status.text = "This title took too long to load. Check the connection and press OK to try again."
+    m.retry = true
+    buildButtons()
+end sub
+
+sub onDetails(event as Object)
+    ' Read the payload from the event's own node, and ignore a response that is no
+    ' longer the current task: it must not clear the live task or stop its deadline.
+    node = event.getRoSGNode()
+    res = node.response
+    if node <> m.task then return
+    DeadlineStop(m.deadline)
     m.task = invalid
     m.spinner.running = false
     if res.ok <> true then
+        ' A deep link that points at an id the catalogue does not know must land on
+        ' Home, not on this error screen with its retry button. A transient failure
+        ' (timeout, dead host, busy server) keeps the retry screen: the link was fine.
+        direct = directPlayMode() <> "" and not m.directPlayUsed
+        if direct then m.directPlayUsed = true
+        if direct and LooksUnknownId(res.error) then
+            m.top.action = { type: "home", message: res.error }
+            return
+        end if
         m.status.text = res.error + "   •   Press OK to retry"
         m.retry = true
         buildButtons()
@@ -122,7 +164,69 @@ sub onDetails()
     end if
     layoutInfo()
     buildButtons()
+    startDirectPlay(directPlayMode())
 end sub
+
+' Direct to Play is requested by MainScene, which adds this field only for a
+' Roku Search deep link. A dynamically added field is absent on every other
+' details visit, so an ordinary screen keeps every existing button and no visit
+' pays for reading a field it does not have.
+function directPlayMode() as String
+    if not m.top.hasField("directPlay") then return ""
+    value = m.top.getField("directPlay")
+    if value = invalid then return ""
+    return LCase(value)
+end function
+
+' The catalogue answers 404 for an id it does not have; a timeout or a dead host
+' must never be mistaken for an unknown title and drop the viewer on Home.
+function LooksUnknownId(error as String) as Boolean
+    text = LCase(error)
+    return Instr(1, text, "404") > 0 or Instr(1, text, "not found") > 0
+end function
+
+' Start playback as soon as the metadata arrives. The catalogue's own type picks
+' the path: a movie starts here at its bookmark, a series hands off to the
+' episodes screen, which already owns the bookmarked episode's resume point.
+sub startDirectPlay(mode as String)
+    if mode = "" or m.directPlayUsed then return
+    m.directPlayUsed = true
+    item = currentItem()
+    if m.details = invalid or item = invalid then return
+    seasons = seasonsOrEmpty()
+    ' A `series` playId that resolves to a movie, or to a series the catalogue has
+    ' no season list for, still has to start instead of showing an empty grid.
+    if item.stype = 2 and seasons.Count() > 0 then
+        target = directEpisodeTarget(seasons)
+        m.top.action = { type: "episodes", item: item, seasons: seasons, se: target.se, ep: target.ep, directPlay: true }
+        return
+    end if
+    m.top.action = { type: "play", item: item, se: 0, ep: 0, resume: resumePosition(item), seasons: seasons }
+end sub
+
+' The bookmark is the history entry's season/episode, and EpisodesScreen turns
+' that into the episode's own resume point. A bookmark pointing at a season or
+' an episode the catalogue no longer carries would stall Direct to Play, so fall
+' back to the first episode of the first season.
+function directEpisodeTarget(seasons as Object) as Object
+    se = seasons[0].se
+    ep = 1
+    if m.playTarget <> invalid then
+        se = m.playTarget.se
+        ep = m.playTarget.ep
+    end if
+    season = invalid
+    for each candidate in seasons
+        if candidate.se = se then season = candidate
+    end for
+    if season = invalid then
+        season = seasons[0]
+        se = season.se
+        ep = 1
+    end if
+    if ep < 1 or ep > season.maxEp then ep = 1
+    return { se: se, ep: ep }
+end function
 
 sub clearButtons()
     m.buttonsGroup.removeChildrenIndex(m.buttonsGroup.getChildCount(), 0)

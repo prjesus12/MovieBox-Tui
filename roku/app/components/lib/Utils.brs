@@ -174,8 +174,26 @@ sub HistorySave(item as Object, se as Integer, ep as Integer, position as Intege
     episodes = {}
     previous = HistoryFindIn(entries, item.id)
     if previous <> invalid and previous.episodes <> invalid then episodes = previous.episodes
+    ' A finished playback is stored at 0 so re-watching starts at the beginning
+    ' instead of dropping the viewer back on the closing credits. The flag keeps
+    ' the fact that it finished: a zeroed position alone reads as "not started",
+    ' and a zeroed episode cannot be told apart from an unwatched one.
+    finished = ProgressFinished(position, duration)
     if se > 0 or ep > 0 then
-        episodes[se.ToStr() + "x" + ep.ToStr()] = { p: position, d: duration }
+        episodes[se.ToStr() + "x" + ep.ToStr()] = { p: position, d: duration, done: finished }
+    end if
+    if finished then
+        position = 0
+        ' A finished episode whose series still has an unfinished one hands the
+        ' resume point over, so Continue Watching continues that episode instead of
+        ' restarting the one that just ended.
+        resume = EpisodeResume(episodes)
+        if resume <> invalid then
+            se = resume.se
+            ep = resume.ep
+            position = resume.p
+            duration = resume.d
+        end if
     end if
     fresh = {
         item: item
@@ -183,6 +201,7 @@ sub HistorySave(item as Object, se as Integer, ep as Integer, position as Intege
         ep: ep
         position: position
         duration: duration
+        finished: finished
         updated: CreateObject("roDateTime").AsSeconds()
         episodes: episodes
     }
@@ -243,12 +262,74 @@ function FavoriteToggle(item as Object) as Boolean
     return true
 end function
 
+' Share of the runtime that counts as finished, mirroring src/history.rs.
+function HistoryFinishRatio() as Float
+    return 0.94
+end function
+
+function ProgressFinished(position as Dynamic, duration as Dynamic) as Boolean
+    if position = invalid or duration = invalid then return false
+    if position <= 0 or duration <= 0 then return false
+    return (position / duration) >= HistoryFinishRatio()
+end function
+
 ' Whether a history entry should appear in Continue Watching.
 function HistoryInProgress(entry as Object) as Boolean
-    if entry.duration = invalid or entry.duration <= 0 then return entry.position > 30
-    ratio = entry.position / entry.duration
-    if entry.item.stype = 2 then return entry.position > 30
-    return entry.position > 30 and ratio < 0.94
+    if entry = invalid or entry.position = invalid then return false
+    if EntryFinished(entry) then
+        ' The latest episode finished. A series only stays while another recorded
+        ' episode is still in progress, so a binge drains instead of sticking.
+        if entry.item <> invalid and entry.item.stype = 2 then return SeriesHasUnfinishedEpisode(entry)
+        return false
+    end if
+    return entry.position > 30
+end function
+
+' Completion is recorded when the entry is written; the ratio stays as the
+' fallback for entries saved by a build that had no flag.
+function EntryFinished(entry as Object) as Boolean
+    if entry.finished = true then return true
+    return ProgressFinished(entry.position, entry.duration)
+end function
+
+function EpisodeFinished(e as Dynamic) as Boolean
+    if e = invalid then return true
+    if e.done = true then return true
+    return ProgressFinished(e.p, e.d)
+end function
+
+' Latest unfinished episode in season/episode order, as { se, ep, p, d }, or
+' invalid when every recorded episode is finished.
+function EpisodeResume(eps as Object) as Dynamic
+    best = invalid
+    bestSe = -1
+    bestEp = -1
+    for each key in eps
+        e = eps[key]
+        if e <> invalid and not EpisodeFinished(e) then
+            parts = key.Split("x")
+            if parts.Count() = 2 then
+                s = parts[0].ToInt()
+                n = parts[1].ToInt()
+                if s > bestSe or (s = bestSe and n > bestEp) then
+                    bestSe = s
+                    bestEp = n
+                    best = { se: s, ep: n, p: e.p, d: e.d }
+                end if
+            end if
+        end if
+    end for
+    return best
+end function
+
+function SeriesHasUnfinishedEpisode(entry as Object) as Boolean
+    eps = entry.episodes
+    if eps = invalid then return false
+    if Type(eps) <> "roAssociativeArray" then return false
+    for each key in eps
+        if not EpisodeFinished(eps[key]) then return true
+    end for
+    return false
 end function
 
 ' Mirrors the API-side filter for titles already saved on the device.
@@ -359,4 +440,86 @@ sub AddonsSetEnabled(url as String, enabled as Boolean)
         if a.url = url then a.enabled = enabled
     end for
     AddonsSave(addons)
+end sub
+
+' ---------------------------------------------------------------------------
+' Deadlines and bounded tmp: usage
+' ---------------------------------------------------------------------------
+
+' Starts (or restarts) a one-shot timer owned by a screen component. Screens use
+' it as a deadline for network work: with no timer a stalled request leaves the
+' spinner up forever and the remote appears dead.
+function DeadlineStart(owner as Object, existing as Dynamic, seconds as Integer, handler as String) as Dynamic
+    timer = existing
+    if timer = invalid then
+        timer = CreateObject("roSGNode", "Timer")
+        timer.repeat = false
+        owner.appendChild(timer)
+    else
+        timer.control = "stop"
+    end if
+    ' Always rebind: a reused timer that kept its first handler would silently run
+    ' the wrong callback.
+    timer.unobserveField("fire")
+    timer.observeField("fire", handler)
+    timer.duration = seconds
+    timer.control = "start"
+    return timer
+end function
+
+sub DeadlineStop(timer as Dynamic)
+    if timer = invalid then return
+    timer.control = "stop"
+end sub
+
+' Ordered index of a directory: file name -> write time in seconds. It lives next
+' to the files so pruning can drop the oldest ones instead of the whole folder.
+function DirIndexRead(dir as String) as Object
+    fs = CreateObject("roFileSystem")
+    path = dir + "/index.json"
+    if not fs.Exists(path) then return {}
+    raw = ParseJson(ReadAsciiFile(path))
+    if Type(raw) <> "roAssociativeArray" then return {}
+    return raw
+end function
+
+sub DirIndexWrite(dir as String, index as Object)
+    fs = CreateObject("roFileSystem")
+    if not fs.Exists(dir) then fs.CreateDirectory(dir)
+    WriteAsciiFile(dir + "/index.json", FormatJson(index))
+end sub
+
+' Deletes the oldest files in `dir` until at most `keep` remain. A file missing
+' from the index counts as the oldest, so a lost index degrades to sweeping the
+' folder instead of failing.
+sub DirPrune(dir as String, keep as Integer, index as Object)
+    fs = CreateObject("roFileSystem")
+    entries = fs.ListDir(dir)
+    if entries = invalid then return
+    names = []
+    for each entry in entries
+        if LCase(entry) <> "index.json" then names.Push(entry)
+    end for
+    removed = 0
+    while names.Count() > keep and removed < 400
+        victim = 0
+        victimTs = 0
+        first = true
+        for i = 0 to names.Count() - 1
+            ts = 0
+            stored = index[names[i]]
+            t = Type(stored)
+            if t = "roInt" or t = "Integer" or t = "roLongInteger" or t = "LongInteger" or t = "roFloat" or t = "Float" or t = "roString" or t = "String" then ts = stored.ToInt()
+            if first or ts < victimTs then
+                victim = i
+                victimTs = ts
+                first = false
+            end if
+        end for
+        name = names[victim]
+        fs.Delete(dir + "/" + name)
+        index.Delete(name)
+        names.Delete(victim)
+        removed = removed + 1
+    end while
 end sub

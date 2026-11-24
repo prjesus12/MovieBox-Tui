@@ -53,7 +53,9 @@ sub renderQuery()
 end sub
 
 sub onKeySelected()
-    key = m.keyboard.content.getChild(m.keyboard.itemSelected).title
+    child = m.keyboard.content.getChild(m.keyboard.itemSelected)
+    if child = invalid then return
+    key = child.title
     if key = "SPACE" then
         if m.query <> "" and Right(m.query, 1) <> " " then m.query = m.query + " "
     else if key = "DELETE" then
@@ -96,16 +98,43 @@ sub startRequest(q as String, page as Integer)
         m.spinner.running = true
         m.results.content = CreateObject("roSGNode", "ContentNode")
     end if
+    ' A new query or page used to leave the previous task running and observed.
+    cancelTask()
     m.task = CreateObject("roSGNode", "ApiTask")
     m.task.observeField("response", "onSearchResponse")
     m.task.request = { action: "search", query: q, page: page, token: m.requestId }
     m.task.control = "run"
+    m.deadlineTask = m.task
+    m.deadline = DeadlineStart(m.top, m.deadline, 20, "onDeadline")
+end sub
+
+sub cancelTask()
+    DeadlineStop(m.deadline)
+    if m.task = invalid then return
+    m.task.unobserveField("response")
+    m.task.control = "stop"
+    m.task = invalid
+end sub
+
+' Nothing arrived inside the deadline: stop waiting and let the viewer retype
+' instead of watching a spinner that will never resolve.
+sub onDeadline()
+    ' Only the deadline armed for the task that is still in flight may fire.
+    if m.task = invalid or m.deadlineTask <> m.task then return
+    cancelTask()
+    m.spinner.running = false
+    m.loadingMore = false
+    m.resultsHint.text = "The search took too long. Check the connection and try again."
 end sub
 
 sub onSearchResponse(event as Object)
     task = event.getRoSGNode()
+    ' A queued response from a cancelled task must not disarm the live request.
+    if task <> m.task then return
     res = task.response
     if res.token <> m.requestId then return
+    DeadlineStop(m.deadline)
+    m.task = invalid
     m.spinner.running = false
     m.loadingMore = false
     if res.ok <> true then
@@ -150,6 +179,7 @@ sub onResultFocused()
 end sub
 
 sub onResultSelected()
+    if m.results.content = invalid then return
     item = m.results.content.getChild(m.results.itemSelected)
     if item <> invalid then m.top.action = { type: "details", item: item }
 end sub

@@ -1,0 +1,33 @@
+{
+  "_source": "https://developer.roku.com/dev/docs/search-feed — advisory_rating_source_type enum, per-source values and conditional value enums, retrieved 2026-11-24",
+  "_note": "advisoryRatings[].value is a fixed list per source. mapping keys are lowercased catalogue ratings; the default applies when nothing matches.",
+  "default": { "source": "MPAA", "value": "NR" },
+  "sources": {
+    "ACB": ["NR"],
+    "BBFC": ["NR", "U", "PG", "12A", "12-A", "12", "15", "18", "R18", "R-18"],
+    "CLASSIND": ["NR"],
+    "CHVRS": ["NR"],
+    "CPR": ["NR"],
+    "FSF": ["NR"],
+    "FSK": ["NR", "0", "6", "12", "16", "18"],
+    "MPAA": ["NR", "G", "PG", "PG13", "PG-13", "R", "NC-17", "NC17", "UR"],
+    "RTC": ["NR", "AA", "A", "B", "B-15", "B15", "C", "D"],
+    "USA_PR": ["NR", "TV-Y", "TVY", "TV-Y7", "TVY7", "TV-G", "TVG", "TV-PG", "TVPG", "TV-14", "TV14", "TV-MA", "TVMA"]
+  },
+  "mapping": {
+    "g": { "source": "MPAA", "value": "G" },
+    "pg": { "source": "MPAA", "value": "PG" },
+    "pg-13": { "source": "MPAA", "value": "PG-13" },
+    "pg13": { "source": "MPAA", "value": "PG-13" },
+    "r": { "source": "MPAA", "value": "R" },
+    "nc-17": { "source": "MPAA", "value": "NC-17" },
+    "nc17": { "source": "MPAA", "value": "NC-17" },
+    "ur": { "source": "MPAA", "value": "UR" },
+    "tv-y": { "source": "USA_PR", "value": "TV-Y" },
+    "tv-y7": { "source": "USA_PR", "value": "TV-Y7" },
+    "tv-g": { "source": "USA_PR", "value": "TV-G" },
+    "tv-pg": { "source": "USA_PR", "value": "TV-PG" },
+    "tv-14": { "source": "USA_PR", "value": "TV-14" },
+    "tv-ma": { "source": "USA_PR", "value": "TV-MA" }
+  }
+}
