@@ -182,7 +182,19 @@ sub HistorySave(item as Object, se as Integer, ep as Integer, position as Intege
     if se > 0 or ep > 0 then
         episodes[se.ToStr() + "x" + ep.ToStr()] = { p: position, d: duration, done: finished }
     end if
-    if finished then position = 0
+    if finished then
+        position = 0
+        ' A finished episode whose series still has an unfinished one hands the
+        ' resume point over, so Continue Watching continues that episode instead of
+        ' restarting the one that just ended.
+        resume = EpisodeResume(episodes)
+        if resume <> invalid then
+            se = resume.se
+            ep = resume.ep
+            position = resume.p
+            duration = resume.d
+        end if
+    end if
     fresh = {
         item: item
         se: se
@@ -284,6 +296,30 @@ function EpisodeFinished(e as Dynamic) as Boolean
     if e = invalid then return true
     if e.done = true then return true
     return ProgressFinished(e.p, e.d)
+end function
+
+' Latest unfinished episode in season/episode order, as { se, ep, p, d }, or
+' invalid when every recorded episode is finished.
+function EpisodeResume(eps as Object) as Dynamic
+    best = invalid
+    bestSe = -1
+    bestEp = -1
+    for each key in eps
+        e = eps[key]
+        if e <> invalid and not EpisodeFinished(e) then
+            parts = key.Split("x")
+            if parts.Count() = 2 then
+                s = parts[0].ToInt()
+                n = parts[1].ToInt()
+                if s > bestSe or (s = bestSe and n > bestEp) then
+                    bestSe = s
+                    bestEp = n
+                    best = { se: s, ep: n, p: e.p, d: e.d }
+                end if
+            end if
+        end if
+    end for
+    return best
 end function
 
 function SeriesHasUnfinishedEpisode(entry as Object) as Boolean

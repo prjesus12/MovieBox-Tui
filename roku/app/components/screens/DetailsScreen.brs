@@ -86,6 +86,7 @@ sub loadDetails(id as String)
     m.task.observeField("response", "onDetails")
     m.task.request = { action: "details", id: id }
     m.task.control = "run"
+    m.deadlineTask = m.task
     m.deadline = DeadlineStart(m.top, m.deadline, 25, "onDeadline")
 end sub
 
@@ -100,7 +101,8 @@ end sub
 ' The detail payload never arrived: swap the spinner for the existing retry
 ' button so the viewer can act instead of guessing whether it is still loading.
 sub onDeadline()
-    if m.task = invalid then return
+    ' Only the deadline armed for the task that is still in flight may fire.
+    if m.task = invalid or m.deadlineTask <> m.task then return
     cancelTask()
     m.spinner.running = false
     m.status.text = "This title took too long to load. Check the connection and press OK to try again."

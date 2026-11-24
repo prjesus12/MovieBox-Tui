@@ -104,6 +104,7 @@ sub startRequest(q as String, page as Integer)
     m.task.observeField("response", "onSearchResponse")
     m.task.request = { action: "search", query: q, page: page, token: m.requestId }
     m.task.control = "run"
+    m.deadlineTask = m.task
     m.deadline = DeadlineStart(m.top, m.deadline, 20, "onDeadline")
 end sub
 
@@ -118,7 +119,8 @@ end sub
 ' Nothing arrived inside the deadline: stop waiting and let the viewer retype
 ' instead of watching a spinner that will never resolve.
 sub onDeadline()
-    if m.task = invalid then return
+    ' Only the deadline armed for the task that is still in flight may fire.
+    if m.task = invalid or m.deadlineTask <> m.task then return
     cancelTask()
     m.spinner.running = false
     m.loadingMore = false
@@ -127,9 +129,9 @@ end sub
 
 sub onSearchResponse(event as Object)
     task = event.getRoSGNode()
+    ' A queued response from a cancelled task must not disarm the live request.
+    if task <> m.task then return
     res = task.response
-    ' Check the token first: a stale response must not clear the live task or stop
-    ' its deadline, which are the only things keeping this query cancellable.
     if res.token <> m.requestId then return
     DeadlineStop(m.deadline)
     m.task = invalid

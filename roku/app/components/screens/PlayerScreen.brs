@@ -81,6 +81,7 @@ sub fetchStreams()
     item = m.top.item
     m.task.request = { action: "streams", id: item.sid, se: m.se, ep: m.ep, title: item.title, year: item.year, stype: item.stype }
     m.task.control = "run"
+    m.deadlineTask = m.task
     m.deadline = DeadlineStart(m.top, m.deadline, 35, "onDeadline")
 end sub
 
@@ -95,7 +96,8 @@ end sub
 ' No stream inside the deadline: stop waiting and take the normal fallback path
 ' instead of leaving the spinner up for as long as the remote is held.
 sub onDeadline()
-    if m.task = invalid then return
+    ' Only the deadline armed for the task that is still in flight may fire.
+    if m.task = invalid or m.deadlineTask <> m.task then return
     cancelTask()
     hideLoading()
     autoAlternatives("MovieBox is taking too long to answer.")

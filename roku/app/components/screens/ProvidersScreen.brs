@@ -158,6 +158,7 @@ sub checkAddon(url as String)
     m.task.observeField("response", "onManifest")
     m.task.request = { action: "addonmanifest", url: url }
     m.task.control = "run"
+    m.deadlineTask = m.task
     m.deadline = DeadlineStart(m.top, m.deadline, 20, "onDeadline")
 end sub
 
@@ -172,7 +173,8 @@ end sub
 ' An addon that never answers used to leave "Checking the addon..." on screen
 ' forever with the keyboard closed.
 sub onDeadline()
-    if m.task = invalid then return
+    ' Only the deadline armed for the task that is still in flight may fire.
+    if m.task = invalid or m.deadlineTask <> m.task then return
     cancelTask()
     setStatus("The addon did not answer. Check the URL and try again.")
 end sub

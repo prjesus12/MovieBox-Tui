@@ -196,3 +196,13 @@ its deadline, because the handler did not compare the event node with `m.task`.
 The lineage is therefore `escalated` and terminal: one bounded correction per
 transaction, so the residual is fixed in a follow-up commit and verified by a
 fresh transaction instead of another correction of the same authority.
+
+L20 (review 3, lineage `review-1978600f580a4449`, tier high, budget 200): two
+critical findings, both accepted. R3-001 — a finished episode zeroed the entry's
+position while `se`/`ep` still named the episode that just ended, so Continue
+Watching restarted it; `EpisodeResume` now hands the entry to the latest
+unfinished episode. R4-001 — the search handler cleared `m.task` for any response
+with a matching token without checking the event node; it now requires the node to
+be the live task, like the other screens. Non-blocking R3-002 (a queued deadline
+fire could cancel a freshly started task) is fixed with a `deadlineTask` identity
+check in all four screens.
