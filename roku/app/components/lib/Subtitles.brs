@@ -132,11 +132,6 @@ function SUB_Download(url as String, id as String) as String
     path = "tmp:/subs/" + safeId + ".srt"
     if fs.Exists(path) then return path
 
-    ' tmp: is shared with the catalogue cache, so the folder stays bounded: prune
-    ' the oldest downloads before adding one instead of growing forever.
-    index = DirIndexRead("tmp:/subs")
-    DirPrune("tmp:/subs", 39, index)
-
     port = CreateObject("roMessagePort")
     xfer = CreateObject("roUrlTransfer")
     xfer.SetMessagePort(port)
@@ -162,7 +157,11 @@ function SUB_Download(url as String, id as String) as String
         fs.Delete(path)
         return ""
     end if
+    ' tmp: is shared with the catalogue cache, so the folder stays bounded. Prune
+    ' only once the new file is on disk, so a failed download evicts nothing.
+    index = DirIndexRead("tmp:/subs")
     index[safeId + ".srt"] = MB_NowSeconds()
+    DirPrune("tmp:/subs", 40, index)
     DirIndexWrite("tmp:/subs", index)
     return path
 end function

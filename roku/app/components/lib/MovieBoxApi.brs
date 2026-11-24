@@ -283,10 +283,14 @@ function MB_RequestHosts(method as String, pathAndQuery as String, body as Dynam
     ' still looking at the screen.
     deadline = MB_NowSeconds() + 25
     for i = 0 to hosts.Count() - 1
-        if i > 0 and MB_NowSeconds() >= deadline then exit for
+        ' Each attempt only gets what is left of the budget, so a slow host cannot
+        ' spend another full 12 s timeout past the deadline.
+        waitMs = (deadline - MB_NowSeconds()) * 1000
+        if i > 0 and waitMs <= 0 then exit for
+        if waitMs <= 0 or waitMs > 12000 then waitMs = 12000
         idx = (start + i) mod hosts.Count()
         headers = MB_SignedHeaders(method, pathAndQuery, body, token)
-        res = MB_HttpRequest(method, hosts[idx] + pathAndQuery, body, headers, 12000)
+        res = MB_HttpRequest(method, hosts[idx] + pathAndQuery, body, headers, waitMs)
         lastCode = res.code
         MB_Log(method + " " + hosts[idx] + pathAndQuery + " -> " + res.code.ToStr() + " (" + Len(res.body).ToStr() + " bytes)")
         if res.code = 401 then

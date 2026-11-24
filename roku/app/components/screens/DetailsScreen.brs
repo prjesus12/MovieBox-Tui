@@ -108,8 +108,10 @@ sub onDeadline()
     buildButtons()
 end sub
 
-sub onDetails()
-    res = m.task.response
+sub onDetails(event as Object)
+    ' Read the payload from the event's own node: a queued response can still be
+    ' delivered after cancelTask cleared m.task.
+    res = event.getRoSGNode().response
     DeadlineStop(m.deadline)
     m.task = invalid
     m.spinner.running = false

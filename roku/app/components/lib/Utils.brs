@@ -175,17 +175,21 @@ sub HistorySave(item as Object, se as Integer, ep as Integer, position as Intege
     previous = HistoryFindIn(entries, item.id)
     if previous <> invalid and previous.episodes <> invalid then episodes = previous.episodes
     ' A finished playback is stored at 0 so re-watching starts at the beginning
-    ' instead of dropping the viewer back on the closing credits.
-    if ProgressFinished(position, duration) then position = 0
+    ' instead of dropping the viewer back on the closing credits. The flag keeps
+    ' the fact that it finished: a zeroed position alone reads as "not started",
+    ' and a zeroed episode cannot be told apart from an unwatched one.
+    finished = ProgressFinished(position, duration)
     if se > 0 or ep > 0 then
-        episodes[se.ToStr() + "x" + ep.ToStr()] = { p: position, d: duration }
+        episodes[se.ToStr() + "x" + ep.ToStr()] = { p: position, d: duration, done: finished }
     end if
+    if finished then position = 0
     fresh = {
         item: item
         se: se
         ep: ep
         position: position
         duration: duration
+        finished: finished
         updated: CreateObject("roDateTime").AsSeconds()
         episodes: episodes
     }
@@ -260,14 +264,26 @@ end function
 ' Whether a history entry should appear in Continue Watching.
 function HistoryInProgress(entry as Object) as Boolean
     if entry = invalid or entry.position = invalid then return false
-    if entry.position <= 30 then return false
-    if ProgressFinished(entry.position, entry.duration) then
-        ' The latest episode finished, so the title only stays while another
-        ' recorded episode is still in progress; otherwise a binge never drains.
+    if EntryFinished(entry) then
+        ' The latest episode finished. A series only stays while another recorded
+        ' episode is still in progress, so a binge drains instead of sticking.
         if entry.item <> invalid and entry.item.stype = 2 then return SeriesHasUnfinishedEpisode(entry)
         return false
     end if
-    return true
+    return entry.position > 30
+end function
+
+' Completion is recorded when the entry is written; the ratio stays as the
+' fallback for entries saved by a build that had no flag.
+function EntryFinished(entry as Object) as Boolean
+    if entry.finished = true then return true
+    return ProgressFinished(entry.position, entry.duration)
+end function
+
+function EpisodeFinished(e as Dynamic) as Boolean
+    if e = invalid then return true
+    if e.done = true then return true
+    return ProgressFinished(e.p, e.d)
 end function
 
 function SeriesHasUnfinishedEpisode(entry as Object) as Boolean
@@ -275,8 +291,7 @@ function SeriesHasUnfinishedEpisode(entry as Object) as Boolean
     if eps = invalid then return false
     if Type(eps) <> "roAssociativeArray" then return false
     for each key in eps
-        e = eps[key]
-        if e <> invalid and not ProgressFinished(e.p, e.d) then return true
+        if not EpisodeFinished(eps[key]) then return true
     end for
     return false
 end function
@@ -397,13 +412,17 @@ end sub
 ' spinner up forever and the remote appears dead.
 function DeadlineStart(owner as Object, existing as Dynamic, seconds as Integer, handler as String) as Dynamic
     timer = existing
-    if timer <> invalid then timer.control = "stop"
     if timer = invalid then
         timer = CreateObject("roSGNode", "Timer")
         timer.repeat = false
-        timer.observeField("fire", handler)
         owner.appendChild(timer)
+    else
+        timer.control = "stop"
     end if
+    ' Always rebind: a reused timer that kept its first handler would silently run
+    ' the wrong callback.
+    timer.unobserveField("fire")
+    timer.observeField("fire", handler)
     timer.duration = seconds
     timer.control = "start"
     return timer

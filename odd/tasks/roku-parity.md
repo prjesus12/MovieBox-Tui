@@ -175,3 +175,16 @@ over the whole tree, and it already fails at `HEAD` on Rust files that landed wi
 the Android client (`src/lib.rs`, `src/ffi.rs`, `src/service.rs`). This slice
 changes no Rust file, so committing it with `--no-verify` bypasses only that
 pre-existing formatting debt, which is left untouched and reported separately.
+
+L18 (review, lineage `review-c00c12d0e76877e2`, tier high, correction budget 172):
+five critical findings, all introduced by the slice and all accepted.
+R3-001/R2-001 — the `position <= 30` early return ran before the series check,
+so a finished episode hid the title even when an earlier episode was unfinished,
+and a zeroed episode read as unwatched; fixed with an explicit `finished`/`done`
+flag plus `EntryFinished`/`EpisodeFinished`. R3-002/R4-001 — the search handler
+cleared `m.task` and stopped the deadline before the token check; the token check
+now runs first. R3-003/R4-002 — `onDetails` read `m.task.response` after
+`cancelTask` could clear it; it now reads the event's own node. Non-blocking
+R2-003 (deadline handler rebinding), R4-003 (prune subtitles only after a
+successful download) and R4-004 (per-attempt share of the host-walk budget) are
+fixed in the same bounded correction.

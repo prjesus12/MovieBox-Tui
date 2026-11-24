@@ -128,9 +128,11 @@ end sub
 sub onSearchResponse(event as Object)
     task = event.getRoSGNode()
     res = task.response
+    ' Check the token first: a stale response must not clear the live task or stop
+    ' its deadline, which are the only things keeping this query cancellable.
+    if res.token <> m.requestId then return
     DeadlineStop(m.deadline)
     m.task = invalid
-    if res.token <> m.requestId then return
     m.spinner.running = false
     m.loadingMore = false
     if res.ok <> true then
